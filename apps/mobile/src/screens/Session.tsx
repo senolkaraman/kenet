@@ -138,20 +138,18 @@ export function Session() {
       }
     });
 
-  const sendClick = (x: number, y: number) => runOnJS(sendPointer)(x, y, true);
-  const sendRightClick = (x: number, y: number) => runOnJS(sendPointerButton)(x, y, "right");
-
-  // Single finger tap -> left click (control mode only).
+  // Single finger tap -> left click (control mode only). runOnJS must be called directly
+  // inside the worklet — wrapping it in a plain JS helper crashes on the UI thread.
   const singleTap = Gesture.Tap().onEnd((e) => {
-    if (controlOn) sendClick(e.x, e.y);
+    if (controlOn) runOnJS(sendPointer)(e.x, e.y, true);
   });
 
   // Two-finger tap -> right click (control mode only).
   const twoFingerTap = Gesture.Tap()
     .minPointers(2)
     .maxDuration(300)
-    .onEnd((e: { x: number; y: number }) => {
-      if (controlOn) sendRightClick(e.x, e.y);
+    .onEnd((e) => {
+      if (controlOn) runOnJS(sendPointerButton)(e.x, e.y, "right");
     });
 
   // Double tap -> zoom toward the point / reset. Only when NOT controlling, so a fast
