@@ -136,6 +136,7 @@ export class SessionController {
   private fsListResolvers = new Map<string, (r: { entries: FsEntry[]; error?: string }) => void>();
   private pendingDecision: { requestId: string; from: string } | undefined;
   private reconnectAttempts = 0;
+  private reconnectDeadline: number | undefined;
   private started = false;
   private lastDeviceToken: string | null = null;
   private lastServerUrl = "";
@@ -448,6 +449,10 @@ export class SessionController {
 
   private onConnected(): void {
     this.reconnectAttempts = 0;
+    if (this.reconnectDeadline !== undefined) {
+      window.clearTimeout(this.reconnectDeadline);
+      this.reconnectDeadline = undefined;
+    }
     this.probe?.start();
     this.set({ phase: "active", startedAt: Date.now(), message: "Güvenli oturum etkin." });
     audit("session-started", this.get().peerName ?? "cihaz");
@@ -499,11 +504,20 @@ export class SessionController {
   }
 
   private onDropped(): void {
-    if (this.get().phase !== "active" && this.get().phase !== "connecting") return;
+    const phase = this.get().phase;
+    if (phase !== "active" && phase !== "connecting" && phase !== "reconnecting") return;
     this.reconnectAttempts += 1;
     if (this.reconnectAttempts > 3) {
       this.endSession("Bağlantı koptu.");
       return;
+    }
+    // Hard deadline: if we're not back to "active" within 25s of the first drop, give up.
+    // Otherwise a peer that just vanished (phone backgrounded, laptop slept) leaves the UI
+    // spinning on "Yeniden bağlanılıyor" forever.
+    if (this.reconnectDeadline === undefined) {
+      this.reconnectDeadline = window.setTimeout(() => {
+        if (this.get().phase === "reconnecting") this.endSession("Bağlantı koptu.");
+      }, 25_000);
     }
     this.set({ phase: "reconnecting", message: "Bağlantı yeniden kuruluyor…" });
     this.pc?.restartIce?.();
@@ -1100,6 +1114,10 @@ export class SessionController {
     this.clipboardIncoming.clear();
     this.fsListResolvers.clear();
     this.reconnectAttempts = 0;
+    if (this.reconnectDeadline !== undefined) {
+      window.clearTimeout(this.reconnectDeadline);
+      this.reconnectDeadline = undefined;
+    }
     this.gradeHistory = [];
     this.autoQuality = "auto";
     audit("session-ended", this.get().peerName ?? "cihaz");

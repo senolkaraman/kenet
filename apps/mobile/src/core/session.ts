@@ -1,3 +1,4 @@
+import { AppState } from "react-native";
 import {
   RTCPeerConnection,
   RTCSessionDescription,
@@ -96,6 +97,16 @@ export class SessionController {
     authStore.subscribe(() => this.syncConnection());
     this.syncConnection();
     void this.loadIceServers();
+    // A remote session in the background is dead weight (video decode stops) and the peer
+    // gets stuck reconnecting to us. End it cleanly the moment the app leaves the foreground.
+    AppState.addEventListener("change", (next) => {
+      if (next !== "active" && this.inLiveSession()) this.endSession("Uygulama arka plana alındı.");
+    });
+  }
+
+  private inLiveSession(): boolean {
+    const p = this.get().phase;
+    return p === "active" || p === "connecting" || p === "requesting" || p === "reconnecting";
   }
 
   private syncConnection(): void {
