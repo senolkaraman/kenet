@@ -1,9 +1,10 @@
-import { useState } from "react";
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
+import { useRef, useState } from "react";
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, TextInput, Platform } from "react-native";
 import { RTCView } from "react-native-webrtc";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, runOnJS } from "react-native-reanimated";
 import { session } from "../core/session";
+import { charToKeyEvents, keyPress } from "../core/keys";
 import { useStore } from "../core/store";
 import { colors } from "../theme";
 
@@ -12,8 +13,10 @@ const MAX_SCALE = 6;
 export function Session() {
   const st = useStore(session.store, (x) => x);
   const [controlOn, setControlOn] = useState(false);
+  const [kbOpen, setKbOpen] = useState(false);
+  const kbRef = useRef<TextInput>(null);
 
-  // pinch-zoom / pan transform (all shared values so gesture worklets can read them)
+  // pinch-zoom / pan transform + video geometry (shared values so gesture worklets can read them)
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const tx = useSharedValue(0);
@@ -22,23 +25,43 @@ export function Session() {
   const savedTy = useSharedValue(0);
   const stageW = useSharedValue(1);
   const stageH = useSharedValue(1);
+  const videoW = useSharedValue(0);
+  const videoH = useSharedValue(0);
 
   const active = st.phase === "active";
   const connecting = st.phase === "connecting" || st.phase === "requesting" || st.phase === "reconnecting";
 
-  // Screen-space touch -> normalised (0..1) point on the remote desktop, undoing the current
-  // pan/zoom so the mouse lands where the finger visually is even while zoomed in. Runs on the
-  // JS thread (via runOnJS) where reading shared-value .value is fine.
+  /**
+   * Screen-space touch -> normalised (0..1) point on the remote desktop.
+   * Undoes (a) the user's pinch/pan transform and (b) the "contain" letterboxing of the
+   * video inside the stage, so a tap lands exactly where the finger visually is — even
+   * on a small target like a checkbox, zoomed in, in portrait with big black bars.
+   */
   const sendPointer = (px: number, py: number, click: boolean) => {
-    const w = stageW.value;
-    const h = stageH.value;
-    const bx = (px - w / 2 - tx.value) / scale.value + w / 2;
-    const by = (py - h / 2 - ty.value) / scale.value + h / 2;
-    const nx = Math.min(1, Math.max(0, bx / w));
-    const ny = Math.min(1, Math.max(0, by / h));
+    const sw = stageW.value;
+    const sh = stageH.value;
+    // undo user zoom/pan (transform is around the stage centre)
+    const bx = (px - sw / 2 - tx.value) / scale.value + sw / 2;
+    const by = (py - sh / 2 - ty.value) / scale.value + sh / 2;
+
+    // the letterboxed rect the video actually occupies inside the stage
+    const vw = videoW.value || sw;
+    const vh = videoH.value || sh;
+    const videoAR = vw / vh;
+    const stageAR = sw / sh;
+    let rectW = sw;
+    let rectH = sh;
+    if (videoAR > stageAR) rectH = sw / videoAR;
+    else rectW = sh * videoAR;
+    const rectX = (sw - rectW) / 2;
+    const rectY = (sh - rectH) / 2;
+
+    const nx = Math.min(1, Math.max(0, (bx - rectX) / rectW));
+    const ny = Math.min(1, Math.max(0, (by - rectY) / rectH));
+
     if (click) {
       session.sendControl({ type: "pointer", x: nx, y: ny, button: "left", down: true });
-      setTimeout(() => session.sendControl({ type: "pointer", x: nx, y: ny, button: "left", down: false }), 40);
+      setTimeout(() => session.sendControl({ type: "pointer", x: nx, y: ny, button: "left", down: false }), 45);
     } else {
       session.sendControl({ type: "pointer", x: nx, y: ny });
     }
@@ -74,7 +97,6 @@ export function Session() {
       savedTy.value = ty.value;
     });
 
-  // Two-finger drag always pans the view.
   const panTwo = Gesture.Pan()
     .minPointers(2)
     .averageTouches(true)
@@ -88,7 +110,6 @@ export function Session() {
       savedTy.value = ty.value;
     });
 
-  // One-finger drag: pans when control is OFF, drives the mouse when control is ON.
   const panOne = Gesture.Pan()
     .minPointers(1)
     .maxPointers(1)
@@ -120,7 +141,6 @@ export function Session() {
       if (scale.value > 1.01) {
         resetZoom();
       } else {
-        // zoom toward the tapped point
         const w = stageW.value;
         const h = stageH.value;
         const target = 2.5;
@@ -143,6 +163,31 @@ export function Session() {
     const next = !controlOn;
     setControlOn(next);
     session.setControlActive(next);
+    if (!next) closeKeyboard();
+  };
+
+  const toggleKeyboard = () => {
+    if (kbOpen) closeKeyboard();
+    else {
+      setKbOpen(true);
+      requestAnimationFrame(() => kbRef.current?.focus());
+    }
+  };
+  const closeKeyboard = () => {
+    setKbOpen(false);
+    kbRef.current?.blur();
+  };
+
+  // Hidden TextInput fed the phone keyboard. We keep its value empty and translate every
+  // change into remote key events, so held state / autocorrect can't accumulate.
+  const onType = (text: string) => {
+    for (const ch of text) {
+      for (const cmd of charToKeyEvents(ch)) session.sendControl(cmd);
+    }
+  };
+  const onKbKeyPress = (e: { nativeEvent: { key: string } }) => {
+    const k = e.nativeEvent.key;
+    if (k === "Backspace") for (const cmd of keyPress("Backspace")) session.sendControl(cmd);
   };
 
   return (
@@ -161,6 +206,10 @@ export function Session() {
                 streamURL={(st.remoteStream as unknown as { toURL: () => string }).toURL()}
                 style={StyleSheet.absoluteFill}
                 objectFit="contain"
+                onDimensionsChange={(e) => {
+                  videoW.value = e.nativeEvent.width;
+                  videoH.value = e.nativeEvent.height;
+                }}
               />
             </Animated.View>
           ) : (
@@ -172,11 +221,37 @@ export function Session() {
         </View>
       </GestureDetector>
 
+      {controlOn && (
+        <TextInput
+          ref={kbRef}
+          value=""
+          onChangeText={onType}
+          onKeyPress={onKbKeyPress}
+          onSubmitEditing={() => {
+            for (const cmd of keyPress("Enter", "Enter")) session.sendControl(cmd);
+          }}
+          onBlur={() => setKbOpen(false)}
+          blurOnSubmit={false}
+          multiline={false}
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="off"
+          spellCheck={false}
+          keyboardType={Platform.OS === "android" ? "visible-password" : "default"}
+          style={styles.hiddenInput}
+        />
+      )}
+
       <View style={styles.toolbar}>
         <Text style={styles.peer} numberOfLines={1}>
           {st.peerName ?? "Cihaz"} · {active ? "canlı" : st.phase}
         </Text>
         <View style={{ flexDirection: "row", gap: 8 }}>
+          {st.controlOffered && controlOn && (
+            <TouchableOpacity style={[styles.tbBtn, kbOpen && styles.tbBtnOn]} onPress={toggleKeyboard}>
+              <Text style={styles.tbBtnText}>⌨</Text>
+            </TouchableOpacity>
+          )}
           {st.controlOffered && (
             <TouchableOpacity style={[styles.tbBtn, controlOn && styles.tbBtnOn]} onPress={toggleControl}>
               <Text style={styles.tbBtnText}>{controlOn ? "Denetim açık" : "Denetim"}</Text>
@@ -194,6 +269,7 @@ export function Session() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#000" },
   stage: { flex: 1, backgroundColor: "#000", overflow: "hidden" },
+  hiddenInput: { position: "absolute", top: -100, left: 0, width: 1, height: 1, opacity: 0 },
   placeholder: {
     position: "absolute",
     top: 0,
