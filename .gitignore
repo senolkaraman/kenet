@@ -29,3 +29,7 @@ infra/gcp/terraform.tfvars
 # misc
 *.log
 .DS_Store
+
+# desktop vite build output
+/apps/desktop/renderer/
+/apps/desktop/dist/
