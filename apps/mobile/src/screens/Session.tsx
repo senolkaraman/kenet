@@ -14,7 +14,9 @@ export function Session() {
   const st = useStore(session.store, (x) => x);
   const [controlOn, setControlOn] = useState(false);
   const [kbOpen, setKbOpen] = useState(false);
+  const [kbSession, setKbSession] = useState(0); // bump to remount the hidden input (clears it)
   const kbRef = useRef<TextInput>(null);
+  const kbBuf = useRef(""); // last known text of the hidden input, for diffing
 
   // pinch-zoom / pan transform + video geometry (shared values so gesture worklets can read them)
   const scale = useSharedValue(1);
@@ -37,13 +39,12 @@ export function Session() {
    * video inside the stage, so a tap lands exactly where the finger visually is — even
    * on a small target like a checkbox, zoomed in, in portrait with big black bars.
    */
-  const sendPointer = (px: number, py: number, click: boolean) => {
+  const toRemoteNorm = (px: number, py: number): { x: number; y: number } => {
     const sw = stageW.value;
     const sh = stageH.value;
     // undo user zoom/pan (transform is around the stage centre)
     const bx = (px - sw / 2 - tx.value) / scale.value + sw / 2;
     const by = (py - sh / 2 - ty.value) / scale.value + sh / 2;
-
     // the letterboxed rect the video actually occupies inside the stage
     const vw = videoW.value || sw;
     const vh = videoH.value || sh;
@@ -53,18 +54,26 @@ export function Session() {
     let rectH = sh;
     if (videoAR > stageAR) rectH = sw / videoAR;
     else rectW = sh * videoAR;
-    const rectX = (sw - rectW) / 2;
-    const rectY = (sh - rectH) / 2;
+    return {
+      x: Math.min(1, Math.max(0, (bx - (sw - rectW) / 2) / rectW)),
+      y: Math.min(1, Math.max(0, (by - (sh - rectH) / 2) / rectH))
+    };
+  };
 
-    const nx = Math.min(1, Math.max(0, (bx - rectX) / rectW));
-    const ny = Math.min(1, Math.max(0, (by - rectY) / rectH));
-
+  const sendPointer = (px: number, py: number, click: boolean) => {
+    const { x, y } = toRemoteNorm(px, py);
     if (click) {
-      session.sendControl({ type: "pointer", x: nx, y: ny, button: "left", down: true });
-      setTimeout(() => session.sendControl({ type: "pointer", x: nx, y: ny, button: "left", down: false }), 45);
+      session.sendControl({ type: "pointer", x, y, button: "left", down: true });
+      setTimeout(() => session.sendControl({ type: "pointer", x, y, button: "left", down: false }), 45);
     } else {
-      session.sendControl({ type: "pointer", x: nx, y: ny });
+      session.sendControl({ type: "pointer", x, y });
     }
+  };
+
+  const sendPointerButton = (px: number, py: number, button: "left" | "right" | "middle") => {
+    const { x, y } = toRemoteNorm(px, py);
+    session.sendControl({ type: "pointer", x, y, button, down: true });
+    setTimeout(() => session.sendControl({ type: "pointer", x, y, button, down: false }), 45);
   };
 
   const clampPan = () => {
@@ -129,14 +138,27 @@ export function Session() {
       }
     });
 
-  const singleTap = Gesture.Tap()
-    .maxDuration(250)
-    .onEnd((e) => {
-      if (controlOn) runOnJS(sendPointer)(e.x, e.y, true);
+  const sendClick = (x: number, y: number) => runOnJS(sendPointer)(x, y, true);
+  const sendRightClick = (x: number, y: number) => runOnJS(sendPointerButton)(x, y, "right");
+
+  // Single finger tap -> left click (control mode only).
+  const singleTap = Gesture.Tap().onEnd((e) => {
+    if (controlOn) sendClick(e.x, e.y);
+  });
+
+  // Two-finger tap -> right click (control mode only).
+  const twoFingerTap = Gesture.Tap()
+    .minPointers(2)
+    .maxDuration(300)
+    .onEnd((e: { x: number; y: number }) => {
+      if (controlOn) sendRightClick(e.x, e.y);
     });
 
+  // Double tap -> zoom toward the point / reset. Only when NOT controlling, so a fast
+  // double tap in control mode passes straight through as a remote double-click.
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
+    .enabled(!controlOn)
     .onEnd((e) => {
       if (scale.value > 1.01) {
         resetZoom();
@@ -153,7 +175,12 @@ export function Session() {
       }
     });
 
-  const composed = Gesture.Exclusive(doubleTap, Gesture.Simultaneous(pinch, panTwo, panOne), singleTap);
+  const composed = Gesture.Simultaneous(
+    pinch,
+    panTwo,
+    panOne,
+    Gesture.Exclusive(doubleTap, twoFingerTap, singleTap)
+  );
 
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }]
@@ -166,28 +193,43 @@ export function Session() {
     if (!next) closeKeyboard();
   };
 
-  const toggleKeyboard = () => {
-    if (kbOpen) closeKeyboard();
-    else {
-      setKbOpen(true);
-      requestAnimationFrame(() => kbRef.current?.focus());
-    }
+  const openKeyboard = () => {
+    kbBuf.current = "";
+    setKbSession((n) => n + 1); // fresh (empty) input
+    setKbOpen(true);
+    setTimeout(() => kbRef.current?.focus(), 60);
   };
   const closeKeyboard = () => {
     setKbOpen(false);
     kbRef.current?.blur();
+    kbBuf.current = "";
   };
+  const toggleKeyboard = () => (kbOpen ? closeKeyboard() : openKeyboard());
 
-  // Hidden TextInput fed the phone keyboard. We keep its value empty and translate every
-  // change into remote key events, so held state / autocorrect can't accumulate.
-  const onType = (text: string) => {
-    for (const ch of text) {
+  // Hidden, uncontrolled TextInput driven by the phone keyboard. Diff each change against
+  // the last known text: characters added -> remote key events, characters removed ->
+  // Backspace. Reset (remount) once it gets long so it can't grow unbounded.
+  const onType = (next: string) => {
+    const prev = kbBuf.current;
+    let p = 0;
+    while (p < prev.length && p < next.length && prev[p] === next[p]) p++;
+    for (let i = 0; i < prev.length - p; i++) {
+      for (const cmd of keyPress("Backspace")) session.sendControl(cmd);
+    }
+    for (const ch of next.slice(p)) {
       for (const cmd of charToKeyEvents(ch)) session.sendControl(cmd);
+    }
+    kbBuf.current = next;
+    if (next.length > 60) {
+      kbBuf.current = "";
+      setKbSession((n) => n + 1);
+      setTimeout(() => kbRef.current?.focus(), 30);
     }
   };
   const onKbKeyPress = (e: { nativeEvent: { key: string } }) => {
-    const k = e.nativeEvent.key;
-    if (k === "Backspace") for (const cmd of keyPress("Backspace")) session.sendControl(cmd);
+    if (e.nativeEvent.key === "Backspace" && kbBuf.current.length === 0) {
+      for (const cmd of keyPress("Backspace")) session.sendControl(cmd);
+    }
   };
 
   return (
@@ -221,10 +263,11 @@ export function Session() {
         </View>
       </GestureDetector>
 
-      {controlOn && (
+      {controlOn && kbOpen && (
         <TextInput
+          key={kbSession}
           ref={kbRef}
-          value=""
+          defaultValue=""
           onChangeText={onType}
           onKeyPress={onKbKeyPress}
           onSubmitEditing={() => {
