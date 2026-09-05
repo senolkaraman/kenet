@@ -1,60 +1,47 @@
 # Kenet Mobil — EAS (Expo bulut) build
 
-EAS Build derlemeyi Expo'nun bulut sunucularında yapar; sana indirilebilir bir link + QR verir
-(yerel 15 dk'lık Gradle beklemesi yok, 30 MB gönderim sınırı yok, iOS de aynı yoldan çıkar).
+EAS Build derlemeyi Expo'nun bulut sunucularında yapar; indirilebilir link + QR verir
+(yerel Gradle beklemesi yok, 30 MB gönderim sınırı yok, iOS de aynı yoldan çıkar).
 
-`eas.json` ve `.easignore` hazır. Yapılması gerekenler (bir kez):
+## Kurulum (bir kez, YAPILDI)
 
-## 1. Expo hesabı + giriş
-
-```
-cd apps/mobile
-npx eas login          # ücretsiz Expo hesabı — yoksa expo.dev'den 1 dk'da açılır
-```
-
-## 2. Projeyi bağla (projectId üretir, app.json'a yazar)
-
-```
-npx eas init
-```
-
-Bu `app.json` içine `expo.extra.eas.projectId` + `expo.owner` ekler. Commit'e dahil et.
-
-## 3. OTA güncelleme kanalını kur (opsiyonel ama önerilir)
-
-```
-npx eas update:configure
-```
-
-Bundan sonra `npx eas update --branch preview` ile JS değişikliklerini native rebuild
-YAPMADAN telefonlara itebilirsin.
+- `eas.json` — `development` / `preview` / `production` profilleri
+- `app.json` — `owner: senolkaraman3452s-team`, `extra.eas.projectId`, `runtimeVersion appVersion`
+- `expo-updates` kuruldu (OTA için)
+- Repo artık **git deposu** (`git init` yapıldı — sadece yerel, GitHub yok). EAS monorepo'yu
+  git kökünden arşivliyor, sunucuda kökte `npm ci` çalıştırıp `apps/mobile`'ı derliyor.
+- `apps/mobile` monorepo'dan bağımsız: `@kenet/protocol` yerine yerel `src/core/protocol.ts`
+  (yalnızca type kopyası).
+- Kimlik: Expo access token'ı ile. Komut başında `EXPO_TOKEN=...` ya da kalıcı env var.
 
 ## Build alma
 
-Bu repo git deposu değil → her `eas build` komutunun başına `EAS_NO_VCS=1` koy
-(EAS tüm klasörü arşivler, `.easignore` gereksizleri eler).
-
-### Android APK (telefona kur)
-
 ```
-EAS_NO_VCS=1 npx eas build --platform android --profile preview
+cd apps/mobile
+EXPO_TOKEN=<token> npx eas build --platform android --profile preview
 ```
 
-Bitince terminalde bir link + QR verir → telefondan aç, indir, kur.
+Bitince terminalde link + QR verir → telefondan aç, indir, kur.
+(Token'ı her seferinde yazmamak için Windows'ta bir kez User env var yap:
+`setx EXPO_TOKEN "<token>"` → yeni terminal aç.)
 
-### iOS
+### OTA güncelleme (native değişiklik YOKSA)
 
 ```
-EAS_NO_VCS=1 npx eas build --platform ios --profile preview
+cd apps/mobile
+EXPO_TOKEN=<token> EAS_SKIP_AUTO_FINGERPRINT=1 npx eas update --branch preview --message "..."
 ```
 
-iOS için **Apple Developer Program ($99/yıl) gerekir** (cihaz kaydı + imzalama veya TestFlight).
-EAS imzalama sihirbazını çalıştırır; Apple hesabına giriş ister. TestFlight için:
-`EAS_NO_VCS=1 npx eas build -p ios --profile production` sonra `npx eas submit -p ios`.
+Telefondaki uygulama bir sonraki açılışta JS'i günceller. Native modül eklediysen (yeni bir
+`react-native-*` paketi) OTA yetmez, yeni `eas build` gerekir.
+
+### iOS (ertelendi)
+
+`EXPO_TOKEN=<token> npx eas build --platform ios --profile preview` — **Apple Developer Program
+($99/yıl)** gerektirir. Gelir getirir hale gelince yapılacak.
 
 ## Notlar
 
 - `preview` profili: dev-client YOK, tek başına çalışır, internal distribution (mağaza değil).
-- `production` profili: Android `.aab` (Play Store), iOS store build.
-- Monorepo: EAS `package-lock.json`'ı kökte görüp workspace'i otomatik çözer.
-- `newArchEnabled: true` + reanimated 4 + react-native-webrtc → EAS'te de aynı şekilde derlenir.
+- `production` profili: Android `.aab` (Play Store).
+- Ücretsiz katmanda ayda sınırlı sayıda build hakkı var (Android için genelde yeterli).
