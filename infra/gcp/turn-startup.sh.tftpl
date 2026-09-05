@@ -1,0 +1,17 @@
+#!/bin/bash
+set -eu
+apt-get update
+apt-get install -y coturn
+cat > /etc/turnserver.conf <<EOF
+listening-port=3478
+fingerprint
+use-auth-secret
+static-auth-secret=${shared_secret}
+realm=remotedesk
+min-port=49152
+max-port=65535
+no-multicast-peers
+no-loopback-peers
+EOF
+systemctl enable coturn
+systemctl restart coturn

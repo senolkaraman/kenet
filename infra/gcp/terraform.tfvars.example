@@ -1,0 +1,5 @@
+project_id         = "your-gcp-project-id"
+region             = "us-central1"
+signal_image       = "us-central1-docker.pkg.dev/your-gcp-project-id/remotedesk/signal:0.1.0"
+turn_shared_secret = "replace-with-a-long-random-secret"
+signal_access_token = "replace-with-a-separate-long-random-secret"

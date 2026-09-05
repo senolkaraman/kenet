@@ -1,0 +1,21 @@
+{
+  "name": "kenet",
+  "version": "0.15.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "dotnet publish apps/windows-agent -c Release && npm run build -w @kenet/protocol && npm run build -w @kenet/signal-server && npm run build -w @kenet/desktop",
+    "check": "dotnet build apps/windows-agent && npm run check -w @kenet/protocol && npm run check -w @kenet/signal-server && npm run check -w @kenet/desktop",
+    "test": "npm run test -w @kenet/protocol && npm run test -w @kenet/signal-server",
+    "package:win": "npm run package:win -w @kenet/desktop"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "electron": "^33.4.11"
+  }
+}

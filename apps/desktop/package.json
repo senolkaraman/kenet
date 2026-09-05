@@ -1,0 +1,68 @@
+{
+  "name": "@kenet/desktop",
+  "version": "0.15.0",
+  "private": true,
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "dotnet build ../windows-agent && concurrently --success first -k \"vite\" \"wait-on tcp:5173 && cross-env NODE_ENV=development electron .\"",
+    "build": "tsc -p tsconfig.main.json && vite build",
+    "check": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "package:win": "dotnet publish ../windows-agent -c Release && npm run build && electron-builder --win nsis portable"
+  },
+  "dependencies": {
+    "@kenet/protocol": "*",
+    "electron-updater": "^6.8.9",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "33.4.11",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.5",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.kenet.app",
+    "productName": "Kenet",
+    "icon": "assets/icon.ico",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "renderer/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets"
+      },
+      {
+        "from": "../windows-agent/bin/Release/net10.0-windows/win-x64/publish",
+        "to": "agent"
+      }
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

@@ -1,0 +1,31 @@
+# deps
+node_modules/
+
+# build output
+dist/
+out/
+build/
+release/
+*.tsbuildinfo
+
+# .NET
+bin/
+obj/
+
+# Expo / React Native
+.expo/
+apps/mobile/android/
+apps/mobile/ios/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# env / secrets
+.env
+.env*.local
+infra/gcp/terraform.tfvars
+
+# misc
+*.log
+.DS_Store

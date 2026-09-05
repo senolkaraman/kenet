@@ -1,0 +1,69 @@
+/* Kenet design tokens — dark-first, light via [data-theme="light"]. */
+
+:root {
+  --font-ui: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* radii + elevation */
+  --r-xs: 6px;
+  --r-sm: 9px;
+  --r-md: 13px;
+  --r-lg: 18px;
+  --r-full: 999px;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.28), 0 1px 1px rgba(0, 0, 0, 0.16);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.32), 0 2px 6px rgba(0, 0, 0, 0.22);
+  --shadow-3: 0 24px 64px rgba(0, 0, 0, 0.44), 0 8px 20px rgba(0, 0, 0, 0.3);
+
+  /* motion */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 340ms;
+
+  /* brand */
+  --brand: #ff5a3c;
+  --brand-strong: #e0492f;
+  --brand-ink: #fff;
+
+  /* semantic status */
+  --ok: #37d67a;
+  --warn: #ffb020;
+  --danger: #ff4d4f;
+  --info: #4aa8ff;
+}
+
+/* dark (default) */
+:root {
+  --bg-0: #0d1014;
+  --bg-1: #14181e;
+  --bg-2: #1b212a;
+  --bg-3: #232b36;
+  --bg-inset: #0a0d11;
+  --stroke: #2b333f;
+  --stroke-soft: #222932;
+  --text-1: #eef2f6;
+  --text-2: #a9b4c0;
+  --text-3: #6f7c8a;
+  --overlay: rgba(6, 9, 13, 0.72);
+  --glass: rgba(20, 24, 30, 0.72);
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg-0: #eef1f4;
+  --bg-1: #f7f8fa;
+  --bg-2: #ffffff;
+  --bg-3: #eef1f5;
+  --bg-inset: #e7eaef;
+  --stroke: #d9dee5;
+  --stroke-soft: #e6e9ee;
+  --text-1: #161b22;
+  --text-2: #4a5560;
+  --text-3: #8a94a0;
+  --overlay: rgba(20, 26, 33, 0.42);
+  --glass: rgba(255, 255, 255, 0.78);
+  --shadow-1: 0 1px 2px rgba(20, 28, 40, 0.1), 0 1px 1px rgba(20, 28, 40, 0.06);
+  --shadow-2: 0 10px 26px rgba(20, 28, 40, 0.12), 0 2px 6px rgba(20, 28, 40, 0.08);
+  --shadow-3: 0 24px 60px rgba(20, 28, 40, 0.18), 0 8px 18px rgba(20, 28, 40, 0.1);
+  color-scheme: light;
+}
