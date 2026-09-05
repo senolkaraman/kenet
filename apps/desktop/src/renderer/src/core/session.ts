@@ -288,6 +288,7 @@ export class SessionController {
   ): Promise<void> {
     const req = explicit ?? this.get().incoming;
     if (!req) return;
+    window.kenetControl.clearAttention?.();
     try {
       this.localStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
     } catch {
@@ -315,6 +316,7 @@ export class SessionController {
   rejectIncoming(): void {
     const req = this.get().incoming;
     if (!req) return;
+    window.kenetControl.clearAttention?.();
     this.signal.signal(req.from, {
       type: "connection-decision",
       requestId: req.requestId,
@@ -358,6 +360,8 @@ export class SessionController {
         phase: "incoming",
         incoming: { from, name: payload.requesterName, requestId: payload.requestId, fromDevice }
       });
+      // Make sure the user actually sees it — brings the window up from the tray + OS notification.
+      window.kenetControl.notifyIncoming?.(payload.requesterName);
       return;
     }
 

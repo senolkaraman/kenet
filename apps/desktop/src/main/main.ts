@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Menu, screen, session, shell, Tray } from "electron";
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Menu, Notification, screen, session, shell, Tray } from "electron";
 import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createWriteStream, type WriteStream } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -199,6 +199,9 @@ const createWindow = () => {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      // Keep the signalling socket + its heartbeat alive when the window is hidden in
+      // the tray, so incoming connection requests still arrive.
+      backgroundThrottling: false,
       preload: path.join(app.getAppPath(), "dist", "preload.js")
     }
   });
@@ -262,6 +265,29 @@ app.whenReady().then(() => {
   ipcMain.on("audit:record", (_event, entry: { event?: unknown; details?: unknown }) => {
     if (typeof entry.event === "string" && typeof entry.details === "string") void recordAudit(entry.event, entry.details);
   });
+
+  // A device wants to connect and the user needs to approve it. If the window is hidden in
+  // the tray or not focused, make it impossible to miss: OS notification + bring the window
+  // to the front + flash the taskbar entry.
+  ipcMain.on("session:incoming", (_event, name: unknown) => {
+    const who = typeof name === "string" && name.trim() ? name.trim().slice(0, 60) : "Bir cihaz";
+    const wasVisible = mainWindow?.isVisible() && mainWindow.isFocused();
+    showWindow();
+    if (!wasVisible) mainWindow?.flashFrame(true);
+    if (Notification.isSupported()) {
+      const note = new Notification({
+        title: "Kenet — bağlantı isteği",
+        body: `${who} bilgisayarına bağlanmak istiyor. Onaylamak için pencereyi aç.`,
+        icon: iconPath()
+      });
+      note.on("click", () => {
+        showWindow();
+        mainWindow?.flashFrame(false);
+      });
+      note.show();
+    }
+  });
+  ipcMain.on("session:attention-clear", () => mainWindow?.flashFrame(false));
   ipcMain.handle("audit:list", async () => {
     try {
       return (await readFile(auditPath(), "utf8"))

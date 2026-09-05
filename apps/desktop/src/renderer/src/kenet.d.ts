@@ -23,6 +23,8 @@ interface Window {
     requestElevation(): Promise<{ started: boolean; reason?: string }>;
     recordAudit(event: string, details: string): void;
     listAudit(): Promise<Array<{ timestamp: string; event: string; details: string }>>;
+    notifyIncoming?(name: string): void;
+    clearAttention?(): void;
     readClipboard?(): Promise<string>;
     writeClipboard?(text: string): Promise<void>;
     listScreens?(): Promise<KenetScreen[]>;

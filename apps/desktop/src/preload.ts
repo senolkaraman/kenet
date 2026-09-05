@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld("kenetControl", {
   requestElevation: () => ipcRenderer.invoke("app:request-elevation") as Promise<{ started: boolean; reason?: string }>,
   recordAudit: (event: string, details: string) => ipcRenderer.send("audit:record", { event, details }),
   listAudit: () => ipcRenderer.invoke("audit:list"),
+  notifyIncoming: (name: string) => ipcRenderer.send("session:incoming", name),
+  clearAttention: () => ipcRenderer.send("session:attention-clear"),
   readClipboard: () => ipcRenderer.invoke("clipboard:read") as Promise<string>,
   writeClipboard: (text: string) => ipcRenderer.invoke("clipboard:write", text) as Promise<void>,
   listScreens: () => ipcRenderer.invoke("screen:list") as Promise<Array<{ id: string; label: string; thumbnail: string }>>,
