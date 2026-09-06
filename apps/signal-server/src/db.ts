@@ -92,7 +92,12 @@ const MIGRATIONS: string[] = [
   `alter table users add column if not exists totp_recovery_hashes text[] not null default '{}'`,
   // ---- Wake-on-LAN ----
   `alter table devices add column if not exists mac_address text`,
-  `alter table devices add column if not exists last_subnet text`
+  `alter table devices add column if not exists last_subnet text`,
+  // ---- Admin panel ----
+  `alter table users add column if not exists is_admin boolean not null default false`,
+  `alter table users add column if not exists disabled boolean not null default false`,
+  `alter table users add column if not exists device_limit_override integer`,
+  `alter table users add column if not exists notes text`
 ];
 
 export const migrate = async (): Promise<void> => {

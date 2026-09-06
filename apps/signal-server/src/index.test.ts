@@ -334,4 +334,68 @@ describe("rate limiting", () => {
     for (let i = 0; i < 15; i += 1) if (rateLimit("login:1.2.3.4", 10, 60_000)) allowed += 1;
     expect(allowed).toBe(10);
   });
+
+  it("exempts admin/allowlisted callers", async () => {
+    const { rateLimit } = await import("./ratelimit.js");
+    let allowed = 0;
+    for (let i = 0; i < 15; i += 1) if (rateLimit("connreq:admin", 5, 60_000, true)) allowed += 1;
+    expect(allowed).toBe(15);
+  });
+});
+
+describe("admin panel", () => {
+  let adminToken = "";
+  let victimId = "";
+  let victimToken = "";
+  let bossId = "";
+
+  it("promotes a user to admin and lists everyone", async () => {
+    const adminMod = await import("./admin.js");
+    const a = await registerHandler(ctx({ email: "boss@b.com", password: "supersecret" }));
+    adminToken = a.token;
+    bossId = a.user.id;
+    const v = await registerHandler(ctx({ email: "victim@b.com", password: "supersecret" }));
+    victimId = v.user.id;
+    victimToken = v.token;
+
+    await expect(adminMod.adminUsersHandler(ctx({}, victimToken))).rejects.toThrow(/[Yy]önetici/);
+
+    await query("update users set is_admin = true where id = $1", [bossId]);
+
+    const list = await adminMod.adminUsersHandler(ctx({}, adminToken));
+    expect(list.find((u) => u.email === "victim@b.com")).toBeTruthy();
+
+    const ov = await adminMod.adminOverviewHandler(ctx({}, adminToken));
+    expect(ov.users).toBeGreaterThanOrEqual(2);
+    expect(ov.admins).toBeGreaterThanOrEqual(1);
+  });
+
+  it("sets a device-limit override and enforces it", async () => {
+    const adminMod = await import("./admin.js");
+    const c = ctx({ deviceLimitOverride: 1 }, adminToken);
+    c.params.id = victimId;
+    const patched = await adminMod.adminPatchUserHandler(c);
+    expect(patched.deviceLimitOverride).toBe(1);
+
+    await registerDeviceHandler(ctx({ name: "pc1" }, victimToken));
+    await expect(registerDeviceHandler(ctx({ name: "pc2" }, victimToken))).rejects.toThrow();
+  });
+
+  it("disables an account so it can no longer log in", async () => {
+    const adminMod = await import("./admin.js");
+    const c = ctx({ disabled: true }, adminToken);
+    c.params.id = victimId;
+    await adminMod.adminPatchUserHandler(c);
+    await expect(loginHandler(ctx({ email: "victim@b.com", password: "supersecret" }))).rejects.toThrow(/devre dışı/);
+  });
+
+  it("won't let an admin disable or demote themselves", async () => {
+    const adminMod = await import("./admin.js");
+    const c1 = ctx({ disabled: true }, adminToken);
+    c1.params.id = bossId;
+    await expect(adminMod.adminPatchUserHandler(c1)).rejects.toThrow();
+    const c2 = ctx({ isAdmin: false }, adminToken);
+    c2.params.id = bossId;
+    await expect(adminMod.adminPatchUserHandler(c2)).rejects.toThrow();
+  });
 });

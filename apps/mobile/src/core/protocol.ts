@@ -17,6 +17,7 @@ export interface AuthUser {
   orgId: string | null;
   orgRole: "owner" | "admin" | "member" | null;
   totpEnabled: boolean;
+  isAdmin: boolean;
 }
 
 export interface DeviceRecord {

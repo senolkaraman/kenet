@@ -16,6 +16,7 @@ import { SettingsModal } from "./screens/Settings";
 import { IncomingRequest } from "./screens/Incoming";
 import { ActivityModal } from "./screens/Activity";
 import { BillingModal } from "./screens/Billing";
+import { AdminModal } from "./screens/Admin";
 import { toast } from "./components/toast";
 
 const inSession = new Set(["connecting", "reconnecting", "active"]);
@@ -35,6 +36,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [billingOpen, setBillingOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
 
   useEffect(() => {
     void bootstrapAuth();
@@ -129,6 +131,11 @@ export function App() {
         <Button icon variant="ghost" title="Hesap etkinliği" onClick={() => setActivityOpen(true)}>
           <Icon name="wifi" />
         </Button>
+        {account?.isAdmin && (
+          <Button icon variant="ghost" title="Yönetici paneli" onClick={() => setAdminOpen(true)}>
+            <Icon name="shield" />
+          </Button>
+        )}
         <Button icon variant="ghost" title="Ayarlar" onClick={() => setSettingsOpen(true)}>
           <Icon name="gear" />
         </Button>
@@ -184,6 +191,7 @@ export function App() {
       {incoming && <IncomingRequest request={incoming} />}
       {activityOpen && <ActivityModal onClose={() => setActivityOpen(false)} />}
       {billingOpen && <BillingModal onClose={() => setBillingOpen(false)} />}
+      {adminOpen && <AdminModal onClose={() => setAdminOpen(false)} />}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       <Toaster />
     </div>

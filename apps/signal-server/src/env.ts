@@ -26,6 +26,17 @@ export const env = {
   turnStaticCredential: process.env.TURN_STATIC_CREDENTIAL?.trim() ?? "",
   corsOrigin: process.env.CORS_ORIGIN?.trim() ?? "*",
   publicUrl: (process.env.PUBLIC_URL?.trim() ?? "").replace(/\/$/, ""),
+  // Accounts always treated as operators — bypass limits, see the admin panel. The operator's
+  // own account, so they never rate-limit themselves while testing.
+  adminEmails: (process.env.ADMIN_EMAILS?.trim() ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+  // IPs exempt from the pre-auth (IP-keyed) throttles — the operator's home/office IP.
+  rateLimitExemptIps: (process.env.RATELIMIT_EXEMPT_IPS?.trim() ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
   resend: {
     apiKey: process.env.RESEND_API_KEY?.trim() ?? "",
     from: process.env.EMAIL_FROM?.trim() || "Kenet <onboarding@resend.dev>"

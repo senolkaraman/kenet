@@ -16,6 +16,7 @@ export const handleConnection = (socket: WebSocket): void => {
   let sessionId: string | undefined;
   let ownerId: string | undefined;
   let role: "device" | "controller" | undefined;
+  let ownerIsAdmin = false;
 
   const authTimer = setTimeout(() => {
     if (!sessionId) {
@@ -79,6 +80,20 @@ export const handleConnection = (socket: WebSocket): void => {
         return;
       }
 
+      const acctId = claims.typ === "device" ? claims.uid : claims.sub;
+      const acct = (
+        await query<{ disabled: boolean; is_admin: boolean }>(
+          "select disabled, is_admin from users where id = $1",
+          [acctId]
+        )
+      ).rows[0];
+      if (acct?.disabled) {
+        send(socket, { type: "error", code: "FORBIDDEN", message: "Bu hesap devre dışı bırakıldı." });
+        socket.close(1008, "Account disabled");
+        return;
+      }
+      ownerIsAdmin = acct?.is_admin ?? false;
+
       clearTimeout(authTimer);
       sessionId = randomUUID();
       if (claims.typ === "device") {
@@ -116,7 +131,7 @@ export const handleConnection = (socket: WebSocket): void => {
       // The real access control is the target's own approval dialog, or a correct
       // unattended password. Rate-limited per sender so a script can't mass-scan codes
       // to spam approval popups on other people's devices.
-      if (message.payload.type === "connection-request" && !rateLimit(`connreq:${ownerId}`, 20, 60_000)) {
+      if (message.payload.type === "connection-request" && !rateLimit(`connreq:${ownerId}`, 20, 60_000, ownerIsAdmin)) {
         send(socket, {
           type: "error",
           code: "INVALID_MESSAGE",

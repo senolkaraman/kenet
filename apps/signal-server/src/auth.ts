@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { AuthResponse, AuthUser, LoginResult, TotpEnableResult, TotpSetup } from "@kenet/protocol";
 import { query } from "./db.js";
+import { env } from "./env.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import { signTotpPending, signUserToken, verifyToken } from "./jwt.js";
 import { HttpError, requireUser, type Ctx } from "./http.js";
@@ -11,7 +12,19 @@ import { generateRecoveryCodes, generateTotpSecret, otpauthUrl, verifyTotpCode }
 
 export const buildUser = async (id: string, email: string): Promise<AuthUser> => {
   const p = await resolvePlan(id);
-  const row = (await query<{ totp_enabled: boolean }>("select totp_enabled from users where id = $1", [id])).rows[0];
+  const row = (
+    await query<{ totp_enabled: boolean; is_admin: boolean }>(
+      "select totp_enabled, is_admin from users where id = $1",
+      [id]
+    )
+  ).rows[0];
+  // The operator's configured account is always an admin; persist it to the column the first
+  // time so the admin panel's user list reflects it.
+  const configuredAdmin = env.adminEmails.includes(email.toLowerCase());
+  const isAdmin = configuredAdmin || (row?.is_admin ?? false);
+  if (configuredAdmin && !row?.is_admin) {
+    void query("update users set is_admin = true where id = $1", [id]);
+  }
   return {
     id,
     email,
@@ -19,14 +32,16 @@ export const buildUser = async (id: string, email: string): Promise<AuthUser> =>
     planRenewsAt: p.planRenewsAt,
     orgId: p.orgId,
     orgRole: p.orgRole,
-    totpEnabled: row?.totp_enabled ?? false
+    totpEnabled: row?.totp_enabled ?? false,
+    isAdmin
   };
 };
 
 const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
 
 const throttle = (ctx: Ctx, action: string, limit: number, windowMs: number): void => {
-  if (!rateLimit(`${action}:${ctx.ip}`, limit, windowMs)) {
+  const exempt = env.rateLimitExemptIps.includes(ctx.ip);
+  if (!rateLimit(`${action}:${ctx.ip}`, limit, windowMs, exempt)) {
     throw new HttpError(429, "Çok fazla deneme. Birkaç dakika sonra tekrar deneyin.");
   }
 };
@@ -69,13 +84,14 @@ export const registerHandler = async (ctx: Ctx): Promise<AuthResponse> => {
 export const loginHandler = async (ctx: Ctx): Promise<LoginResult> => {
   throttle(ctx, "login", 10, 15 * 60 * 1000);
   const { email, password } = readCredentials(ctx.body);
-  const found = await query<UserRow>(
-    "select id, email, password_hash, totp_enabled from users where email = $1",
+  const found = await query<UserRow & { disabled: boolean }>(
+    "select id, email, password_hash, totp_enabled, disabled from users where email = $1",
     [email]
   );
   const user = found.rows[0];
   const ok = user ? await verifyPassword(password, user.password_hash) : false;
   if (!user || !ok) throw new HttpError(401, "E-posta veya şifre hatalı.");
+  if (user.disabled) throw new HttpError(403, "Bu hesap devre dışı bırakıldı.");
   if (user.totp_enabled) return { requiresTotp: true, pendingToken: signTotpPending(user.id) };
   return { token: signUserToken(user), user: await buildUser(user.id, user.email) };
 };

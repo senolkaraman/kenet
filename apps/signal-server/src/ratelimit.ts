@@ -5,7 +5,8 @@ interface Bucket {
 
 const buckets = new Map<string, Bucket>();
 
-export const rateLimit = (key: string, limit: number, windowMs: number): boolean => {
+export const rateLimit = (key: string, limit: number, windowMs: number, exempt = false): boolean => {
+  if (exempt) return true;
   const now = Date.now();
   const bucket = buckets.get(key) ?? { hits: [] };
   bucket.hits = bucket.hits.filter((t) => now - t < windowMs);

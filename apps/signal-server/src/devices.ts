@@ -65,14 +65,25 @@ export const registerDeviceHandler = async (ctx: Ctx): Promise<DeviceRegistratio
     }
   }
 
+  const acct = (
+    await query<{ is_admin: boolean; disabled: boolean; device_limit_override: number | null }>(
+      "select is_admin, disabled, device_limit_override from users where id = $1",
+      [userId]
+    )
+  ).rows[0];
+  if (acct?.disabled) throw new HttpError(403, "Bu hesap devre dışı bırakıldı.");
+
   const { plan } = await resolvePlan(userId);
   const count = Number(
     (await query<{ c: string }>("select count(*) as c from devices where user_id = $1", [userId])).rows[0].c
   );
-  if (count >= limitsFor(plan).maxDevices) {
+  const effectiveLimit = acct?.is_admin
+    ? Number.MAX_SAFE_INTEGER
+    : (acct?.device_limit_override ?? limitsFor(plan).maxDevices);
+  if (count >= effectiveLimit) {
     throw new HttpError(
       402,
-      `${plan === "free" ? "Ücretsiz plan" : "Planınız"} en fazla ${limitsFor(plan).maxDevices} cihaza izin veriyor. Pro'ya yükseltin.`
+      `${plan === "free" ? "Ücretsiz plan" : "Planınız"} en fazla ${effectiveLimit} cihaza izin veriyor. Pro'ya yükseltin.`
     );
   }
 

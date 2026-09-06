@@ -44,6 +44,48 @@ export interface AuthUser {
   orgId: string | null;
   orgRole: "owner" | "admin" | "member" | null;
   totpEnabled: boolean;
+  /** Operator account: bypasses device + rate limits, can open the admin panel. */
+  isAdmin: boolean;
+}
+
+// ---- Admin panel ----
+
+export interface AdminOverview {
+  users: number;
+  admins: number;
+  disabled: number;
+  newUsers7d: number;
+  activeUsers7d: number;
+  devices: number;
+  devicesOnline: number;
+  sessions7d: number;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  plan: Plan;
+  isAdmin: boolean;
+  disabled: boolean;
+  deviceLimitOverride: number | null;
+  deviceCount: number;
+  sessions7d: number;
+  lastActivityAt: string | null;
+  createdAt: string;
+}
+
+export interface AdminUserDetail extends AdminUser {
+  notes: string | null;
+  devices: DeviceRecord[];
+  recentEvents: { kind: string; at: string; actorDeviceId: string | null; targetDeviceId: string | null }[];
+}
+
+export interface AdminUserPatch {
+  plan?: Plan;
+  isAdmin?: boolean;
+  disabled?: boolean;
+  deviceLimitOverride?: number | null;
+  notes?: string;
 }
 
 export interface DeviceRecord {

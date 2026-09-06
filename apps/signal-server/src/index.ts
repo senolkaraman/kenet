@@ -35,6 +35,13 @@ import {
   pendingInvitesHandler,
   removeMemberHandler
 } from "./orgs.js";
+import {
+  adminDeleteUserHandler,
+  adminOverviewHandler,
+  adminPatchUserHandler,
+  adminUserDetailHandler,
+  adminUsersHandler
+} from "./admin.js";
 import { handleConnection } from "./signaling.js";
 
 const api = new Router()
@@ -63,7 +70,12 @@ const api = new Router()
   .post("/orgs/:id/invites", inviteHandler)
   .delete("/orgs/:id/members/:userId", removeMemberHandler)
   .get("/invites", pendingInvitesHandler)
-  .post("/invites/:id/accept", acceptInviteHandler);
+  .post("/invites/:id/accept", acceptInviteHandler)
+  .get("/admin/overview", adminOverviewHandler)
+  .get("/admin/users", adminUsersHandler)
+  .get("/admin/users/:id", adminUserDetailHandler)
+  .patch("/admin/users/:id", adminPatchUserHandler)
+  .delete("/admin/users/:id", adminDeleteUserHandler);
 
 const turnCredentials = (res: Parameters<typeof json>[0], token: string | undefined): void => {
   const hasStatic = env.turnStaticUrls.length > 0 && env.turnStaticUsername && env.turnStaticCredential;
