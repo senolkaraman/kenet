@@ -43,7 +43,10 @@ export function Session() {
   const kbBuf = useRef("");
   const modsRef = useRef<string[]>([]);
   modsRef.current = mods;
-  const scrollAccum = useRef({ x: 0, y: 0 });
+  const controlRef = useRef(false);
+  controlRef.current = controlOn;
+  const ctrlSV = useSharedValue(false);
+  ctrlSV.value = controlOn;
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -55,8 +58,8 @@ export function Session() {
   const stageH = useSharedValue(1);
   const videoW = useSharedValue(0);
   const videoH = useSharedValue(0);
-  const scrollPrevX = useSharedValue(0);
-  const scrollPrevY = useSharedValue(0);
+  const scrollAccumX = useSharedValue(0);
+  const scrollAccumY = useSharedValue(0);
 
   const active = st.phase === "active";
   const connecting = st.phase === "connecting" || st.phase === "requesting" || st.phase === "reconnecting";
@@ -140,16 +143,10 @@ export function Session() {
     session.sendControl({ type: "pointer", x, y, button: "left", down: false });
   };
 
-  // Two-finger drag delta (px) -> mouse-wheel notches. Accumulate the fraction so slow
-  // drags aren't lost to rounding. Finger down => wheel down (mouse-wheel convention).
-  const sendScroll = (px: number, py: number, dxPx: number, dyPx: number) => {
-    scrollAccum.current.y += dyPx * 0.02;
-    scrollAccum.current.x += dxPx * 0.02;
-    const ny = Math.trunc(scrollAccum.current.y);
-    const nx = Math.trunc(scrollAccum.current.x);
-    if (!nx && !ny) return;
-    scrollAccum.current.y -= ny;
-    scrollAccum.current.x -= nx;
+  // Emit a wheel event at a screen point. `nx`/`ny` are wheel steps; the agent turns each into
+  // ~2 notches, so a two-finger swipe of ~120px sends ~3 steps ≈ 6 notches. Finger down =>
+  // wheel down (trackpad / mouse-wheel convention).
+  const emitScroll = (px: number, py: number, nx: number, ny: number) => {
     const { x, y } = toRemoteNorm(px, py);
     session.sendControl({ type: "scroll", x, y, dx: nx, dy: ny });
   };
@@ -208,28 +205,36 @@ export function Session() {
       savedTy.value = ty.value;
     });
 
+  const SCROLL_STEP = 18; // px of two-finger movement per wheel step
+
   // Two-finger drag: scroll wheel when controlling, pan the zoomed view otherwise.
   const panTwo = Gesture.Pan()
     .minPointers(2)
+    .maxPointers(2)
     .averageTouches(true)
+    .minDistance(3)
     .onStart(() => {
-      scrollPrevX.value = 0;
-      scrollPrevY.value = 0;
+      scrollAccumX.value = 0;
+      scrollAccumY.value = 0;
     })
-    .onUpdate((e) => {
-      if (controlOn) {
-        const dY = e.translationY - scrollPrevY.value;
-        const dX = e.translationX - scrollPrevX.value;
-        scrollPrevY.value = e.translationY;
-        scrollPrevX.value = e.translationX;
-        if (dY !== 0 || dX !== 0) runOnJS(sendScroll)(e.x, e.y, dX, dY);
+    .onChange((e) => {
+      if (ctrlSV.value) {
+        scrollAccumY.value += e.changeY;
+        scrollAccumX.value += e.changeX;
+        const ny = Math.trunc(scrollAccumY.value / SCROLL_STEP);
+        const nx = Math.trunc(scrollAccumX.value / SCROLL_STEP);
+        if (nx !== 0 || ny !== 0) {
+          scrollAccumY.value -= ny * SCROLL_STEP;
+          scrollAccumX.value -= nx * SCROLL_STEP;
+          runOnJS(emitScroll)(e.x, e.y, nx, ny);
+        }
       } else {
-        tx.value = savedTx.value + e.translationX;
-        ty.value = savedTy.value + e.translationY;
+        tx.value += e.changeX;
+        ty.value += e.changeY;
       }
     })
     .onEnd(() => {
-      if (!controlOn) {
+      if (!ctrlSV.value) {
         clampPan();
         savedTx.value = tx.value;
         savedTy.value = ty.value;
@@ -240,7 +245,7 @@ export function Session() {
     .minPointers(1)
     .maxPointers(1)
     .onUpdate((e) => {
-      if (controlOn) {
+      if (ctrlSV.value) {
         runOnJS(sendPointer)(e.x, e.y, false);
       } else {
         tx.value = savedTx.value + e.translationX;
@@ -248,7 +253,7 @@ export function Session() {
       }
     })
     .onEnd(() => {
-      if (!controlOn) {
+      if (!ctrlSV.value) {
         clampPan();
         savedTx.value = tx.value;
         savedTy.value = ty.value;
@@ -269,14 +274,14 @@ export function Session() {
   const singleTap = Gesture.Tap()
     .maxDuration(220)
     .onEnd((e) => {
-      if (controlOn) runOnJS(sendPointer)(e.x, e.y, true);
+      if (ctrlSV.value) runOnJS(sendPointer)(e.x, e.y, true);
     });
 
   const twoFingerTap = Gesture.Tap()
     .minPointers(2)
     .maxDuration(300)
     .onEnd((e) => {
-      if (controlOn) runOnJS(sendPointerButton)(e.x, e.y, "right");
+      if (ctrlSV.value) runOnJS(sendPointerButton)(e.x, e.y, "right");
     });
 
   // Double tap: a real remote double-click when controlling (open files/folders), or
@@ -285,7 +290,7 @@ export function Session() {
     .numberOfTaps(2)
     .maxDelay(280)
     .onEnd((e) => {
-      if (controlOn) {
+      if (ctrlSV.value) {
         runOnJS(sendDoubleClick)(e.x, e.y);
         return;
       }
