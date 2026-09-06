@@ -34,6 +34,8 @@ export interface SessionState {
   controlActive: boolean;
   remoteStream: MediaStream | null;
   startedAt: number | null;
+  /** Last clipboard text received from the remote PC (for a "copy to phone" action). */
+  remoteClipboard: string | null;
 }
 
 const initialState: SessionState = {
@@ -45,7 +47,8 @@ const initialState: SessionState = {
   controlOffered: false,
   controlActive: false,
   remoteStream: null,
-  startedAt: null
+  startedAt: null,
+  remoteClipboard: null
 };
 
 // Free public STUN, a few for redundancy. TURN is added from the server's /turn-credentials
@@ -67,6 +70,7 @@ export class SessionController {
   private started = false;
   private lastToken: string | null = null;
   private reconnectAttempts = 0;
+  private reconnectDeadline: ReturnType<typeof setTimeout> | undefined;
   private deviceName = "Kenet Mobil";
 
   private get = () => this.store.get();
@@ -255,15 +259,25 @@ export class SessionController {
 
   private onConnected(): void {
     this.reconnectAttempts = 0;
+    if (this.reconnectDeadline) {
+      clearTimeout(this.reconnectDeadline);
+      this.reconnectDeadline = undefined;
+    }
     this.set({ phase: "active", startedAt: Date.now(), message: "Güvenli oturum etkin." });
   }
 
   private onDropped(): void {
-    if (this.get().phase !== "active" && this.get().phase !== "connecting") return;
+    const phase = this.get().phase;
+    if (phase !== "active" && phase !== "connecting" && phase !== "reconnecting") return;
     this.reconnectAttempts += 1;
     if (this.reconnectAttempts > 3) {
       this.endSession("Bağlantı koptu.");
       return;
+    }
+    if (this.reconnectDeadline === undefined) {
+      this.reconnectDeadline = setTimeout(() => {
+        if (this.get().phase === "reconnecting") this.endSession("Bağlantı koptu.");
+      }, 25000);
     }
     this.set({ phase: "reconnecting", message: "Bağlantı yeniden kuruluyor…" });
     (this.pc as unknown as { restartIce?: () => void })?.restartIce?.();
@@ -294,6 +308,7 @@ export class SessionController {
   private onData(message: DataMessage | null): void {
     if (!message) return;
     if (message.type === "bye") this.endSession("Karşı taraf oturumu sonlandırdı.");
+    else if (message.type === "clipboard") this.set({ remoteClipboard: message.text });
   }
 
   // ---------- control (viewer -> host) ----------
@@ -305,6 +320,11 @@ export class SessionController {
 
   sendControl(command: ControlCommand): void {
     if (this.get().controlActive) this.send({ type: "control", command });
+  }
+
+  /** Push the phone's clipboard text onto the remote PC's clipboard. */
+  sendClipboardText(text: string): void {
+    if (text) this.send({ type: "clipboard", text });
   }
 
   requestQuality(mode: "auto" | "sharp" | "smooth"): void {
@@ -328,6 +348,10 @@ export class SessionController {
     }
     this.pc = undefined;
     this.reconnectAttempts = 0;
+    if (this.reconnectDeadline) {
+      clearTimeout(this.reconnectDeadline);
+      this.reconnectDeadline = undefined;
+    }
     this.set({
       phase: this.get().registered ? "online" : "offline",
       peerCode: null,
@@ -336,6 +360,7 @@ export class SessionController {
       controlOffered: false,
       controlActive: false,
       startedAt: null,
+      remoteClipboard: null,
       message: reason
     });
   }

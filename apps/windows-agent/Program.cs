@@ -225,6 +225,10 @@ static class Input
         };
         if (named != 0) return (ushort)named;
 
+        // F1..F24 by name (combo chords pass keys as `key`, not `code`).
+        if (key is { Length: >= 2 } && key[0] == 'F' && int.TryParse(key.AsSpan(1), out var fnum) && fnum is >= 1 and <= 24)
+            return (ushort)(0x70 + fnum - 1);
+
         if (key is { Length: 1 })
         {
             var scan = VkKeyScan(key[0]);

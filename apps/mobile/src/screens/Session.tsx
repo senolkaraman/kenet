@@ -1,24 +1,42 @@
 import { useRef, useState } from "react";
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, TextInput, Platform } from "react-native";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ActivityIndicator,
+  StyleSheet,
+  TextInput,
+  Platform,
+  ScrollView
+} from "react-native";
 import { RTCView } from "react-native-webrtc";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, runOnJS } from "react-native-reanimated";
+import * as Clipboard from "expo-clipboard";
 import { session } from "../core/session";
-import { charToKeyEvents, keyPress } from "../core/keys";
+import { charToKeyEvents, keyPress, keyWithMods, comboCmd } from "../core/keys";
 import { useStore } from "../core/store";
 import { colors } from "../theme";
 
 const MAX_SCALE = 6;
+const MODS = ["Control", "Alt", "Shift", "Meta"] as const;
+const MOD_LABEL: Record<string, string> = { Control: "Ctrl", Alt: "Alt", Shift: "⇧", Meta: "⊞" };
 
 export function Session() {
   const st = useStore(session.store, (x) => x);
   const [controlOn, setControlOn] = useState(false);
   const [kbOpen, setKbOpen] = useState(false);
-  const [kbSession, setKbSession] = useState(0); // bump to remount the hidden input (clears it)
+  const [kbSession, setKbSession] = useState(0);
+  const [keysBar, setKeysBar] = useState(false);
+  const [mods, setMods] = useState<string[]>([]);
+  const [moreKeys, setMoreKeys] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const kbRef = useRef<TextInput>(null);
-  const kbBuf = useRef(""); // last known text of the hidden input, for diffing
+  const kbBuf = useRef("");
+  const modsRef = useRef<string[]>([]);
+  modsRef.current = mods;
+  const scrollAccum = useRef({ x: 0, y: 0 });
 
-  // pinch-zoom / pan transform + video geometry (shared values so gesture worklets can read them)
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const tx = useSharedValue(0);
@@ -29,23 +47,22 @@ export function Session() {
   const stageH = useSharedValue(1);
   const videoW = useSharedValue(0);
   const videoH = useSharedValue(0);
+  const scrollPrevX = useSharedValue(0);
+  const scrollPrevY = useSharedValue(0);
 
   const active = st.phase === "active";
   const connecting = st.phase === "connecting" || st.phase === "requesting" || st.phase === "reconnecting";
 
-  /**
-   * Screen-space touch -> normalised (0..1) point on the remote desktop.
-   * Undoes (a) the user's pinch/pan transform and (b) the "contain" letterboxing of the
-   * video inside the stage, so a tap lands exactly where the finger visually is — even
-   * on a small target like a checkbox, zoomed in, in portrait with big black bars.
-   */
+  const flash = (m: string) => {
+    setToast(m);
+    setTimeout(() => setToast(null), 1800);
+  };
+
   const toRemoteNorm = (px: number, py: number): { x: number; y: number } => {
     const sw = stageW.value;
     const sh = stageH.value;
-    // undo user zoom/pan (transform is around the stage centre)
     const bx = (px - sw / 2 - tx.value) / scale.value + sw / 2;
     const by = (py - sh / 2 - ty.value) / scale.value + sh / 2;
-    // the letterboxed rect the video actually occupies inside the stage
     const vw = videoW.value || sw;
     const vh = videoH.value || sh;
     const videoAR = vw / vh;
@@ -60,11 +77,23 @@ export function Session() {
     };
   };
 
+  const clearMods = () => {
+    if (modsRef.current.length) setMods([]);
+  };
+
   const sendPointer = (px: number, py: number, click: boolean) => {
     const { x, y } = toRemoteNorm(px, py);
     if (click) {
+      const m = modsRef.current;
+      m.forEach((mod) => session.sendControl({ type: "key", key: mod, code: "", down: true, modifiers: [] }));
       session.sendControl({ type: "pointer", x, y, button: "left", down: true });
-      setTimeout(() => session.sendControl({ type: "pointer", x, y, button: "left", down: false }), 45);
+      setTimeout(() => {
+        session.sendControl({ type: "pointer", x, y, button: "left", down: false });
+        [...m].reverse().forEach((mod) =>
+          session.sendControl({ type: "key", key: mod, code: "", down: false, modifiers: [] })
+        );
+      }, 45);
+      clearMods();
     } else {
       session.sendControl({ type: "pointer", x, y });
     }
@@ -76,6 +105,45 @@ export function Session() {
     setTimeout(() => session.sendControl({ type: "pointer", x, y, button, down: false }), 45);
   };
 
+  // Two-finger drag delta (px) -> mouse-wheel notches. Accumulate the fraction so slow
+  // drags aren't lost to rounding. Finger down => wheel down (mouse-wheel convention).
+  const sendScroll = (px: number, py: number, dxPx: number, dyPx: number) => {
+    scrollAccum.current.y += dyPx * 0.02;
+    scrollAccum.current.x += dxPx * 0.02;
+    const ny = Math.trunc(scrollAccum.current.y);
+    const nx = Math.trunc(scrollAccum.current.x);
+    if (!nx && !ny) return;
+    scrollAccum.current.y -= ny;
+    scrollAccum.current.x -= nx;
+    const { x, y } = toRemoteNorm(px, py);
+    session.sendControl({ type: "scroll", x, y, dx: nx, dy: ny });
+  };
+
+  // named key from the shortcut bar
+  const fireKey = (key: string, code = "") => {
+    for (const cmd of keyWithMods(key, modsRef.current, code)) session.sendControl(cmd);
+    clearMods();
+  };
+  const fireCombo = (keys: string[]) => {
+    session.sendControl(comboCmd(keys));
+    clearMods();
+  };
+
+  const toggleMod = (mod: string) => setMods((cur) => (cur.includes(mod) ? cur.filter((m) => m !== mod) : [...cur, mod]));
+
+  // ---------- clipboard ----------
+  const pushClipboard = async () => {
+    const text = await Clipboard.getStringAsync();
+    if (!text) return flash("Telefon panosu boş");
+    session.sendClipboardText(text);
+    flash("Pano PC'ye gönderildi");
+  };
+  const pullClipboard = async () => {
+    if (!st.remoteClipboard) return flash("PC panosu boş");
+    await Clipboard.setStringAsync(st.remoteClipboard);
+    flash("PC panosu telefona kopyalandı");
+  };
+
   const clampPan = () => {
     "worklet";
     const maxX = (stageW.value * (scale.value - 1)) / 2 + stageW.value * 0.4;
@@ -83,7 +151,6 @@ export function Session() {
     tx.value = Math.min(maxX, Math.max(-maxX, tx.value));
     ty.value = Math.min(maxY, Math.max(-maxY, ty.value));
   };
-
   const resetZoom = () => {
     "worklet";
     scale.value = withTiming(1);
@@ -106,17 +173,32 @@ export function Session() {
       savedTy.value = ty.value;
     });
 
+  // Two-finger drag: scroll wheel when controlling, pan the zoomed view otherwise.
   const panTwo = Gesture.Pan()
     .minPointers(2)
     .averageTouches(true)
+    .onStart(() => {
+      scrollPrevX.value = 0;
+      scrollPrevY.value = 0;
+    })
     .onUpdate((e) => {
-      tx.value = savedTx.value + e.translationX;
-      ty.value = savedTy.value + e.translationY;
+      if (controlOn) {
+        const dY = e.translationY - scrollPrevY.value;
+        const dX = e.translationX - scrollPrevX.value;
+        scrollPrevY.value = e.translationY;
+        scrollPrevX.value = e.translationX;
+        if (dY !== 0 || dX !== 0) runOnJS(sendScroll)(e.x, e.y, dX, dY);
+      } else {
+        tx.value = savedTx.value + e.translationX;
+        ty.value = savedTy.value + e.translationY;
+      }
     })
     .onEnd(() => {
-      clampPan();
-      savedTx.value = tx.value;
-      savedTy.value = ty.value;
+      if (!controlOn) {
+        clampPan();
+        savedTx.value = tx.value;
+        savedTy.value = ty.value;
+      }
     });
 
   const panOne = Gesture.Pan()
@@ -138,13 +220,10 @@ export function Session() {
       }
     });
 
-  // Single finger tap -> left click (control mode only). runOnJS must be called directly
-  // inside the worklet — wrapping it in a plain JS helper crashes on the UI thread.
   const singleTap = Gesture.Tap().onEnd((e) => {
     if (controlOn) runOnJS(sendPointer)(e.x, e.y, true);
   });
 
-  // Two-finger tap -> right click (control mode only).
   const twoFingerTap = Gesture.Tap()
     .minPointers(2)
     .maxDuration(300)
@@ -152,15 +231,12 @@ export function Session() {
       if (controlOn) runOnJS(sendPointerButton)(e.x, e.y, "right");
     });
 
-  // Double tap -> zoom toward the point / reset. Only when NOT controlling, so a fast
-  // double tap in control mode passes straight through as a remote double-click.
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
     .enabled(!controlOn)
     .onEnd((e) => {
-      if (scale.value > 1.01) {
-        resetZoom();
-      } else {
+      if (scale.value > 1.01) resetZoom();
+      else {
         const w = stageW.value;
         const h = stageH.value;
         const target = 2.5;
@@ -188,12 +264,16 @@ export function Session() {
     const next = !controlOn;
     setControlOn(next);
     session.setControlActive(next);
-    if (!next) closeKeyboard();
+    setKeysBar(next);
+    if (!next) {
+      closeKeyboard();
+      setMods([]);
+    }
   };
 
   const openKeyboard = () => {
     kbBuf.current = "";
-    setKbSession((n) => n + 1); // fresh (empty) input
+    setKbSession((n) => n + 1);
     setKbOpen(true);
     setTimeout(() => kbRef.current?.focus(), 60);
   };
@@ -204,9 +284,6 @@ export function Session() {
   };
   const toggleKeyboard = () => (kbOpen ? closeKeyboard() : openKeyboard());
 
-  // Hidden, uncontrolled TextInput driven by the phone keyboard. Diff each change against
-  // the last known text: characters added -> remote key events, characters removed ->
-  // Backspace. Reset (remount) once it gets long so it can't grow unbounded.
   const onType = (next: string) => {
     const prev = kbBuf.current;
     let p = 0;
@@ -215,7 +292,8 @@ export function Session() {
       for (const cmd of keyPress("Backspace")) session.sendControl(cmd);
     }
     for (const ch of next.slice(p)) {
-      for (const cmd of charToKeyEvents(ch)) session.sendControl(cmd);
+      for (const cmd of keyWithMods(ch, modsRef.current)) session.sendControl(cmd);
+      clearMods();
     }
     kbBuf.current = next;
     if (next.length > 60) {
@@ -229,6 +307,12 @@ export function Session() {
       for (const cmd of keyPress("Backspace")) session.sendControl(cmd);
     }
   };
+
+  const K = ({ label, on, onPress }: { label: string; on?: boolean; onPress: () => void }) => (
+    <TouchableOpacity style={[styles.key, on && styles.keyOn]} onPress={onPress}>
+      <Text style={styles.keyText}>{label}</Text>
+    </TouchableOpacity>
+  );
 
   return (
     <View style={styles.screen}>
@@ -261,6 +345,12 @@ export function Session() {
         </View>
       </GestureDetector>
 
+      {toast && (
+        <View style={styles.toast}>
+          <Text style={styles.toastText}>{toast}</Text>
+        </View>
+      )}
+
       {controlOn && kbOpen && (
         <TextInput
           key={kbSession}
@@ -283,11 +373,48 @@ export function Session() {
         />
       )}
 
+      {controlOn && keysBar && (
+        <View style={styles.keysWrap}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.keysRow}>
+            <K label="Esc" onPress={() => fireKey("Escape")} />
+            <K label="Tab" onPress={() => fireKey("Tab", "Tab")} />
+            {MODS.map((m) => (
+              <K key={m} label={MOD_LABEL[m]} on={mods.includes(m)} onPress={() => toggleMod(m)} />
+            ))}
+            <K label="←" onPress={() => fireKey("ArrowLeft")} />
+            <K label="↑" onPress={() => fireKey("ArrowUp")} />
+            <K label="↓" onPress={() => fireKey("ArrowDown")} />
+            <K label="→" onPress={() => fireKey("ArrowRight")} />
+            <K label="⌫" onPress={() => fireKey("Backspace")} />
+            <K label="⏎" onPress={() => fireKey("Enter", "Enter")} />
+            <K label="Ctrl+Alt+Del" onPress={() => fireCombo(["Control", "Alt", "Delete"])} />
+            <K label={moreKeys ? "Az" : "Daha"} onPress={() => setMoreKeys((v) => !v)} />
+          </ScrollView>
+          {moreKeys && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.keysRow}>
+              {["Home", "End", "PageUp", "PageDown", "Delete", "Insert"].map((k) => (
+                <K key={k} label={k} onPress={() => fireKey(k)} />
+              ))}
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => (
+                <K key={n} label={`F${n}`} onPress={() => fireKey(`F${n}`, `F${n}`)} />
+              ))}
+              <K label="📋→PC" onPress={pushClipboard} />
+              <K label="PC→📋" onPress={pullClipboard} />
+            </ScrollView>
+          )}
+        </View>
+      )}
+
       <View style={styles.toolbar}>
         <Text style={styles.peer} numberOfLines={1}>
           {st.peerName ?? "Cihaz"} · {active ? "canlı" : st.phase}
         </Text>
         <View style={{ flexDirection: "row", gap: 8 }}>
+          {st.controlOffered && controlOn && (
+            <TouchableOpacity style={[styles.tbBtn, keysBar && styles.tbBtnOn]} onPress={() => setKeysBar((v) => !v)}>
+              <Text style={styles.tbBtnText}>Tuşlar</Text>
+            </TouchableOpacity>
+          )}
           {st.controlOffered && controlOn && (
             <TouchableOpacity style={[styles.tbBtn, kbOpen && styles.tbBtnOn]} onPress={toggleKeyboard}>
               <Text style={styles.tbBtnText}>⌨</Text>
@@ -322,6 +449,37 @@ const styles = StyleSheet.create({
     gap: 16
   },
   placeholderText: { color: colors.textDim, fontSize: 15, textAlign: "center", paddingHorizontal: 30 },
+  toast: {
+    position: "absolute",
+    top: 16,
+    alignSelf: "center",
+    backgroundColor: "rgba(15,17,21,0.92)",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8
+  },
+  toastText: { color: colors.text, fontSize: 13 },
+  keysWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 46,
+    backgroundColor: "rgba(15,17,21,0.9)",
+    paddingVertical: 6
+  },
+  keysRow: { flexDirection: "row", gap: 6, paddingHorizontal: 8, alignItems: "center" },
+  key: {
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: "rgba(32,36,46,0.95)",
+    minWidth: 36,
+    alignItems: "center"
+  },
+  keyOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+  keyText: { color: colors.text, fontSize: 13, fontWeight: "600" },
   toolbar: {
     position: "absolute",
     left: 0,

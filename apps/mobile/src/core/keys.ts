@@ -75,3 +75,20 @@ export function charToKeyEvents(ch: string): ControlCommand[] {
 export function keyPress(key: string, code = ""): ControlCommand[] {
   return [keyEvent(key, code, true, []), keyEvent(key, code, false, [])];
 }
+
+/** A chord — the agent presses every key in order, then releases in reverse. Use for
+ *  modifier combos (Ctrl+C, Ctrl+Alt+Del, Ctrl+Shift+Esc, …). Key names match the agent:
+ *  "Control" "Alt" "Shift" "Meta" plus named keys ("Delete", "Escape", "Tab", …) or a
+ *  single character. */
+export function comboCmd(keys: string[]): ControlCommand {
+  return { type: "combo", keys };
+}
+
+/** Wrap a key/char with the currently-armed sticky modifiers. Returns a combo when mods are
+ *  active (and the caller should then clear them), otherwise a plain press. `key` may be a
+ *  named key or a single character. */
+export function keyWithMods(key: string, mods: string[], code = ""): ControlCommand[] {
+  if (mods.length) return [comboCmd([...mods, key])];
+  if (key.length === 1) return charToKeyEvents(key);
+  return keyPress(key, code);
+}
