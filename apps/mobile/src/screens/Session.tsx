@@ -113,6 +113,19 @@ export function Session() {
     setTimeout(() => session.sendControl({ type: "pointer", x, y, button, down: false }), 45);
   };
 
+  // Explicit double-click: two clicks at the *same* remote coordinate, close together, so
+  // Windows registers it (a fast finger double-tap otherwise lands two clicks a few pixels
+  // apart and opens nothing).
+  const sendDoubleClick = (px: number, py: number) => {
+    const { x, y } = toRemoteNorm(px, py);
+    const clickAt = () => {
+      session.sendControl({ type: "pointer", x, y, button: "left", down: true });
+      setTimeout(() => session.sendControl({ type: "pointer", x, y, button: "left", down: false }), 25);
+    };
+    clickAt();
+    setTimeout(clickAt, 90);
+  };
+
   // Two-finger drag delta (px) -> mouse-wheel notches. Accumulate the fraction so slow
   // drags aren't lost to rounding. Finger down => wheel down (mouse-wheel convention).
   const sendScroll = (px: number, py: number, dxPx: number, dyPx: number) => {
@@ -228,9 +241,11 @@ export function Session() {
       }
     });
 
-  const singleTap = Gesture.Tap().onEnd((e) => {
-    if (controlOn) runOnJS(sendPointer)(e.x, e.y, true);
-  });
+  const singleTap = Gesture.Tap()
+    .maxDuration(220)
+    .onEnd((e) => {
+      if (controlOn) runOnJS(sendPointer)(e.x, e.y, true);
+    });
 
   const twoFingerTap = Gesture.Tap()
     .minPointers(2)
@@ -239,10 +254,16 @@ export function Session() {
       if (controlOn) runOnJS(sendPointerButton)(e.x, e.y, "right");
     });
 
+  // Double tap: a real remote double-click when controlling (open files/folders), or
+  // zoom-to-point / reset when just viewing.
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
-    .enabled(!controlOn)
+    .maxDelay(280)
     .onEnd((e) => {
+      if (controlOn) {
+        runOnJS(sendDoubleClick)(e.x, e.y);
+        return;
+      }
       if (scale.value > 1.01) resetZoom();
       else {
         const w = stageW.value;
