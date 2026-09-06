@@ -126,6 +126,20 @@ export function Session() {
     setTimeout(clickAt, 90);
   };
 
+  // Drag: long-press holds the left button down, then finger movement drags, lifting releases.
+  const startDrag = (px: number, py: number) => {
+    const { x, y } = toRemoteNorm(px, py);
+    session.sendControl({ type: "pointer", x, y, button: "left", down: true });
+  };
+  const dragMove = (px: number, py: number) => {
+    const { x, y } = toRemoteNorm(px, py);
+    session.sendControl({ type: "pointer", x, y });
+  };
+  const endDrag = (px: number, py: number) => {
+    const { x, y } = toRemoteNorm(px, py);
+    session.sendControl({ type: "pointer", x, y, button: "left", down: false });
+  };
+
   // Two-finger drag delta (px) -> mouse-wheel notches. Accumulate the fraction so slow
   // drags aren't lost to rounding. Finger down => wheel down (mouse-wheel convention).
   const sendScroll = (px: number, py: number, dxPx: number, dyPx: number) => {
@@ -241,6 +255,17 @@ export function Session() {
       }
     });
 
+  // Hold, then drag — a real button-held drag on the remote (move windows, select text,
+  // drag & drop). Only when controlling; a quick drag still just moves the cursor.
+  const dragPan = Gesture.Pan()
+    .minPointers(1)
+    .maxPointers(1)
+    .enabled(controlOn)
+    .activateAfterLongPress(350)
+    .onStart((e) => runOnJS(startDrag)(e.x, e.y))
+    .onUpdate((e) => runOnJS(dragMove)(e.x, e.y))
+    .onEnd((e) => runOnJS(endDrag)(e.x, e.y));
+
   const singleTap = Gesture.Tap()
     .maxDuration(220)
     .onEnd((e) => {
@@ -281,7 +306,7 @@ export function Session() {
   const composed = Gesture.Simultaneous(
     pinch,
     panTwo,
-    panOne,
+    Gesture.Exclusive(dragPan, panOne),
     Gesture.Exclusive(doubleTap, twoFingerTap, singleTap)
   );
 
