@@ -137,6 +137,7 @@ export class SessionController {
   private pendingDecision: { requestId: string; from: string } | undefined;
   private reconnectAttempts = 0;
   private reconnectDeadline: number | undefined;
+  private privacyHeartbeat: number | undefined;
   private started = false;
   private lastDeviceToken: string | null = null;
   private lastServerUrl = "";
@@ -192,7 +193,15 @@ export class SessionController {
         this.set({ message });
         if (code === "UNAUTHORIZED") this.set({ registered: false });
       },
-      onClose: () => this.set({ registered: false, phase: this.get().role === "idle" ? "offline" : this.get().phase })
+      onClose: () => {
+        // Signalling socket gone mid-session — if we're the blanked host, restore the screen.
+        if (this.get().privacyActive) {
+          void window.kenetControl.setPrivacyMode?.(false);
+          this.set({ privacyActive: false });
+          this.stopPrivacyHeartbeat();
+        }
+        this.set({ registered: false, phase: this.get().role === "idle" ? "offline" : this.get().phase });
+      }
     });
   }
 
@@ -225,8 +234,13 @@ export class SessionController {
       return;
     }
     if (token !== this.lastDeviceToken || url !== this.lastServerUrl) {
+      const hadToken = this.lastDeviceToken !== null;
       this.lastDeviceToken = token;
       this.lastServerUrl = url;
+      // Our identity changed (code rotated) or the server moved — any peer in a live session
+      // is talking to the old us and can't follow. Tear the session down so we're reachable
+      // again instead of stuck "busy" on a dead link.
+      if (hadToken && this.get().role !== "idle") this.endSession("Cihaz kodu yenilendi.");
       this.signal.reconnectWith(token, settingsStore.get().deviceName);
       void this.loadIceServers();
     }
@@ -510,6 +524,15 @@ export class SessionController {
   private onDropped(): void {
     const phase = this.get().phase;
     if (phase !== "active" && phase !== "connecting" && phase !== "reconnecting") return;
+    // Safety first: the instant the link looks broken, un-blank this machine's own screen and
+    // release its keyboard/mouse. Nobody is watching a dropped session, and a black+locked
+    // screen that only comes back after a 25s reconnect timeout is genuinely scary. If the
+    // session recovers, the viewer can turn privacy back on.
+    if (this.get().privacyActive) {
+      void window.kenetControl.setPrivacyMode?.(false);
+      this.set({ privacyActive: false });
+      this.stopPrivacyHeartbeat();
+    }
     this.reconnectAttempts += 1;
     if (this.reconnectAttempts > 3) {
       this.endSession("Bağlantı koptu.");
@@ -963,7 +986,24 @@ export class SessionController {
   async setPrivacyMode(on: boolean): Promise<void> {
     if (this.get().role !== "host") return;
     const result = await window.kenetControl.setPrivacyMode?.(on);
-    if (result?.ok) this.set({ privacyActive: on });
+    if (result?.ok) {
+      this.set({ privacyActive: on });
+      if (on) this.startPrivacyHeartbeat();
+      else this.stopPrivacyHeartbeat();
+    }
+  }
+
+  /** While the screen is blanked, tell the agent we're alive every 2s. If this stops (crash,
+   *  hang, dropped session), the agent restores the screen itself after ~8s. */
+  private startPrivacyHeartbeat(): void {
+    if (this.privacyHeartbeat) return;
+    window.kenetControl.privacyHeartbeat?.();
+    this.privacyHeartbeat = window.setInterval(() => window.kenetControl.privacyHeartbeat?.(), 2000);
+  }
+
+  private stopPrivacyHeartbeat(): void {
+    if (this.privacyHeartbeat) window.clearInterval(this.privacyHeartbeat);
+    this.privacyHeartbeat = undefined;
   }
 
   // ---------- quality / screens ----------
@@ -1099,6 +1139,7 @@ export class SessionController {
     // back to its normal drop detection.
     if (reason !== "Karşı taraf oturumu sonlandırdı.") this.send({ type: "bye" });
     if (this.get().privacyActive) void window.kenetControl.setPrivacyMode?.(false);
+    this.stopPrivacyHeartbeat();
     if (this.get().role === "host") void window.kenetControl.hideOverlay?.();
     if (this.recorder) void this.stopRecording();
     this.stopClipboardSync();

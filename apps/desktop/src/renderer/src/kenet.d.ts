@@ -47,6 +47,7 @@ interface Window {
     saveToDownloads?(name: string, data: ArrayBuffer): Promise<{ saved: boolean; path?: string }>;
     pickFile?(): Promise<{ ok: boolean; path?: string; name?: string }>;
     setPrivacyMode?(on: boolean): Promise<{ ok: boolean }>;
+    privacyHeartbeat?(): void;
     showOverlay?(): Promise<{ ok: boolean }>;
     hideOverlay?(): Promise<{ ok: boolean }>;
     overlayDraw?(stroke: unknown): void;

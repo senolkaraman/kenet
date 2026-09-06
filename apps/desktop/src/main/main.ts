@@ -317,6 +317,11 @@ app.whenReady().then(() => {
     inputAgent.stdin.write(`${JSON.stringify({ type: "privacy", down: on })}\n`);
     return { ok: true };
   });
+  // Renderer pings this every 2s while the screen is blanked; the agent restores the screen on
+  // its own if these stop arriving (renderer crashed/hung, or the session dropped uncleanly).
+  ipcMain.on("agent:privacy-heartbeat", () => {
+    inputAgent?.stdin.write(`${JSON.stringify({ type: "privacy-ping" })}\n`);
+  });
 
   // ---- On-screen annotation: the viewer draws, it's rendered live on this (host) screen ----
   ipcMain.handle("overlay:show", () => {

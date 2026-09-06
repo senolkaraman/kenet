@@ -169,7 +169,11 @@ export class SessionController {
   private async handleSignal(from: string, payload: SignalPayload): Promise<void> {
     if (payload.type === "connection-decision") {
       if (!payload.approved) {
-        this.set({ phase: "ended", peerCode: null, message: "Bağlantı isteği reddedildi." });
+        const msg =
+          payload.reason === "busy"
+            ? "Karşı cihaz şu an başka bir oturumda. Birazdan tekrar deneyin."
+            : "Bağlantı isteği reddedildi.";
+        this.set({ phase: "ended", peerCode: null, message: msg });
         setTimeout(() => {
           if (this.get().phase === "ended") this.set({ phase: this.get().registered ? "online" : "offline" });
         }, 2500);

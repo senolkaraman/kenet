@@ -2,13 +2,31 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+// Dead-man's switch: while privacy mode blanks + locks this machine, the host app sends a
+// heartbeat line every ~2s. If we go 8s without hearing anything from it (host crashed,
+// hung, or the remote session dropped without a clean teardown), restore the screen and
+// unlock input ourselves — never leave the user staring at a black, frozen desktop.
+long lastLineTicks = DateTime.UtcNow.Ticks;
+using var deadMan = new Timer(
+    _ =>
+    {
+        var idle = DateTime.UtcNow - new DateTime(Interlocked.Read(ref lastLineTicks), DateTimeKind.Utc);
+        if (Privacy.IsActive && idle.TotalSeconds > 8) Privacy.SetActive(false);
+    },
+    null,
+    1000,
+    1000
+);
+
 while (Console.ReadLine() is { } line)
 {
+    Interlocked.Exchange(ref lastLineTicks, DateTime.UtcNow.Ticks);
     try
     {
         var command = JsonSerializer.Deserialize(line, AgentJsonContext.Default.ControlCommand);
         if (command is null) continue;
         if (command.Type == "privacy" && command.Down is { } privacyOn) Privacy.SetActive(privacyOn);
+        else if (command.Type == "privacy-ping") { /* heartbeat only */ }
         else Input.Apply(command);
     }
     catch (JsonException)
@@ -58,27 +76,36 @@ static class Privacy
 {
     private static bool _active;
     private static Timer? _watchdog;
+    private static readonly object _gate = new();
+
+    public static bool IsActive
+    {
+        get { lock (_gate) return _active; }
+    }
 
     public static void SetActive(bool on)
     {
-        if (on == _active) return;
-        _active = on;
+        lock (_gate)
+        {
+            if (on == _active) return;
+            _active = on;
 
-        if (on)
-        {
-            BlockInput(true);
-            SetMonitorPower(off: true);
-            // Belt-and-suspenders: re-assert monitor-off periodically. Nothing in this process should
-            // wake it, but a driver/power-management quirk waking the display shouldn't leave it lit
-            // for the rest of the session.
-            _watchdog = new Timer(_ => SetMonitorPower(off: true), null, 2000, 2000);
-        }
-        else
-        {
-            _watchdog?.Dispose();
-            _watchdog = null;
-            SetMonitorPower(off: false);
-            BlockInput(false);
+            if (on)
+            {
+                BlockInput(true);
+                SetMonitorPower(off: true);
+                // Belt-and-suspenders: re-assert monitor-off periodically. Nothing in this process
+                // should wake it, but a driver/power-management quirk waking the display shouldn't
+                // leave it lit for the rest of the session.
+                _watchdog = new Timer(_ => SetMonitorPower(off: true), null, 2000, 2000);
+            }
+            else
+            {
+                _watchdog?.Dispose();
+                _watchdog = null;
+                SetMonitorPower(off: false);
+                BlockInput(false);
+            }
         }
     }
 

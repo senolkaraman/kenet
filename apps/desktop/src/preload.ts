@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld("kenetControl", {
     ipcRenderer.invoke("fs:save-to-downloads", { name, data }) as Promise<{ saved: boolean; path?: string }>,
   pickFile: () => ipcRenderer.invoke("fs:pick-file") as Promise<{ ok: boolean; path?: string; name?: string }>,
   setPrivacyMode: (on: boolean) => ipcRenderer.invoke("agent:set-privacy", on) as Promise<{ ok: boolean }>,
+  privacyHeartbeat: () => ipcRenderer.send("agent:privacy-heartbeat"),
   showOverlay: () => ipcRenderer.invoke("overlay:show") as Promise<{ ok: boolean }>,
   hideOverlay: () => ipcRenderer.invoke("overlay:hide") as Promise<{ ok: boolean }>,
   overlayDraw: (stroke: unknown) => ipcRenderer.send("overlay:draw", stroke),
