@@ -22,6 +22,14 @@ const MAX_SCALE = 6;
 const MODS = ["Control", "Alt", "Shift", "Meta"] as const;
 const MOD_LABEL: Record<string, string> = { Control: "Ctrl", Alt: "Alt", Shift: "⇧", Meta: "⊞" };
 
+function KeyBtn({ label, on, onPress }: { label: string; on?: boolean; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={[styles.key, on && styles.keyOn]} onPress={onPress}>
+      <Text style={styles.keyText}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 export function Session() {
   const st = useStore(session.store, (x) => x);
   const [controlOn, setControlOn] = useState(false);
@@ -308,12 +316,6 @@ export function Session() {
     }
   };
 
-  const K = ({ label, on, onPress }: { label: string; on?: boolean; onPress: () => void }) => (
-    <TouchableOpacity style={[styles.key, on && styles.keyOn]} onPress={onPress}>
-      <Text style={styles.keyText}>{label}</Text>
-    </TouchableOpacity>
-  );
-
   return (
     <View style={styles.screen}>
       <GestureDetector gesture={composed}>
@@ -376,30 +378,30 @@ export function Session() {
       {controlOn && keysBar && (
         <View style={styles.keysWrap}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.keysRow}>
-            <K label="Esc" onPress={() => fireKey("Escape")} />
-            <K label="Tab" onPress={() => fireKey("Tab", "Tab")} />
+            <KeyBtn label="Esc" onPress={() => fireKey("Escape")} />
+            <KeyBtn label="Tab" onPress={() => fireKey("Tab", "Tab")} />
             {MODS.map((m) => (
-              <K key={m} label={MOD_LABEL[m]} on={mods.includes(m)} onPress={() => toggleMod(m)} />
+              <KeyBtn key={m} label={MOD_LABEL[m]} on={mods.includes(m)} onPress={() => toggleMod(m)} />
             ))}
-            <K label="←" onPress={() => fireKey("ArrowLeft")} />
-            <K label="↑" onPress={() => fireKey("ArrowUp")} />
-            <K label="↓" onPress={() => fireKey("ArrowDown")} />
-            <K label="→" onPress={() => fireKey("ArrowRight")} />
-            <K label="⌫" onPress={() => fireKey("Backspace")} />
-            <K label="⏎" onPress={() => fireKey("Enter", "Enter")} />
-            <K label="Ctrl+Alt+Del" onPress={() => fireCombo(["Control", "Alt", "Delete"])} />
-            <K label={moreKeys ? "Az" : "Daha"} onPress={() => setMoreKeys((v) => !v)} />
+            <KeyBtn label="←" onPress={() => fireKey("ArrowLeft")} />
+            <KeyBtn label="↑" onPress={() => fireKey("ArrowUp")} />
+            <KeyBtn label="↓" onPress={() => fireKey("ArrowDown")} />
+            <KeyBtn label="→" onPress={() => fireKey("ArrowRight")} />
+            <KeyBtn label="⌫" onPress={() => fireKey("Backspace")} />
+            <KeyBtn label="⏎" onPress={() => fireKey("Enter", "Enter")} />
+            <KeyBtn label="Ctrl+Alt+Del" onPress={() => fireCombo(["Control", "Alt", "Delete"])} />
+            <KeyBtn label={moreKeys ? "Az" : "Daha"} onPress={() => setMoreKeys((v) => !v)} />
           </ScrollView>
           {moreKeys && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.keysRow}>
               {["Home", "End", "PageUp", "PageDown", "Delete", "Insert"].map((k) => (
-                <K key={k} label={k} onPress={() => fireKey(k)} />
+                <KeyBtn key={k} label={k} onPress={() => fireKey(k)} />
               ))}
               {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => (
-                <K key={n} label={`F${n}`} onPress={() => fireKey(`F${n}`, `F${n}`)} />
+                <KeyBtn key={n} label={`F${n}`} onPress={() => fireKey(`F${n}`, `F${n}`)} />
               ))}
-              <K label="📋→PC" onPress={pushClipboard} />
-              <K label="PC→📋" onPress={pullClipboard} />
+              <KeyBtn label="📋→PC" onPress={pushClipboard} />
+              <KeyBtn label="PC→📋" onPress={pullClipboard} />
             </ScrollView>
           )}
         </View>
