@@ -305,6 +305,7 @@ export class SessionController {
     window.kenetControl.clearAttention?.();
     try {
       this.localStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
+      this.hintMotion(this.localStream);
     } catch {
       this.set({ message: "Ekran paylaşımı reddedildi." });
       return;
@@ -478,6 +479,9 @@ export class SessionController {
     if (this.get().role === "host") void window.kenetControl.showOverlay?.();
     this.startClipboardSync();
     this.startIdleWatch();
+    // The host never applied any encoding params before the first "quality" message, so it started
+    // with Chromium's freeze-prone screen defaults. Set a sane profile + maintain-framerate now.
+    if (this.get().role === "host") void this.applyQuality("auto");
     void refreshDevices();
   }
 
@@ -1031,10 +1035,21 @@ export class SessionController {
     this.send({ type: "quality", mode });
   }
 
+  /**
+   * Tell the encoder this is interactive screen content: under load, drop resolution before it
+   * drops frames. Without this, Chromium's default for a screen source is "maintain-resolution",
+   * which freezes the picture for a second or two every time the remote user drags a window.
+   */
+  private hintMotion(stream: MediaStream): void {
+    for (const track of stream.getVideoTracks()) track.contentHint = "motion";
+  }
+
   private async applyQuality(mode: "auto" | "sharp" | "smooth"): Promise<void> {
     const sender = this.pc?.getSenders().find((s) => s.track?.kind === "video");
     if (!sender) return;
     const params = sender.getParameters();
+    // Keep the cursor and window drags smooth even mid-encode; resolution recovers when idle.
+    params.degradationPreference = "maintain-framerate";
     params.encodings = params.encodings?.length ? params.encodings : [{}];
     const enc = params.encodings[0];
     if (mode === "sharp") {
@@ -1137,6 +1152,7 @@ export class SessionController {
     try {
       await window.kenetControl.setPreferredScreen?.(id);
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
+      this.hintMotion(stream);
       const nextTrack = stream.getVideoTracks()[0];
       const sender = this.pc?.getSenders().find((s) => s.track?.kind === "video");
       if (sender && nextTrack) {
