@@ -22,3 +22,6 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run build
+      # Advisory only — surfaces known-vulnerable deps without blocking the build.
+      - run: npm audit --audit-level=high
+        continue-on-error: true

@@ -1,0 +1,40 @@
+name: Release
+
+# Bir sürüm çıkarmak için:
+#   npm version 0.21.0 -w @kenet/desktop   (ya da elle version'u yükselt)
+#   git commit -am "desktop 0.21.0"
+#   git tag v0.21.0 && git push --tags
+#
+# Bu iş Windows'ta paketleyip installer + latest.yml dosyalarını
+# GitHub Releases'e yükler. electron-updater buradan otomatik güncelleme yapar.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+          dotnet-quality: preview
+
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+
+      - name: Paketle ve GitHub Releases'e yayınla
+        run: npm run package:win -w @kenet/desktop -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
