@@ -67,10 +67,9 @@ jobs:
         shell: pwsh
         run: |
           Push-Location apps/desktop
-          $builderCmd = Join-Path $env:GITHUB_WORKSPACE "node_modules\.bin\electron-builder.cmd"
           for ($attempt = 1; $attempt -le 3; $attempt++) {
             Write-Host "Packaging attempt $attempt/3"
-            & $builderCmd --win nsis portable --publish never
+            npm exec --workspace @kenet/desktop -- electron-builder --win nsis portable --publish never
             if ($LASTEXITCODE -eq 0) {
               Pop-Location
               exit 0
