@@ -85,9 +85,14 @@ jobs:
           Pop-Location
           throw "Packaging failed after 3 attempts."
 
+      # Only a real tag push produces a release; a manual workflow_dispatch just proves the build.
       - name: GitHub Releases'e yükle
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          name: Kenet ${{ github.ref_name }}
+          make_latest: true
           files: |
             apps/desktop/release/*.exe
             apps/desktop/release/*.exe.blockmap
