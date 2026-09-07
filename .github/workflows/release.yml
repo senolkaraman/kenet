@@ -37,7 +37,17 @@ jobs:
       - run: npm run check
       - run: npm test
 
-      - name: Paketle ve GitHub Releases'e yayınla
-        run: npm run package:win -w @kenet/desktop -- --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Build only — the exact command that already produces a working installer locally.
+      # electron-builder still writes latest.yml (update feed) because a publish block is
+      # configured in apps/desktop/package.json.
+      - name: Paketle (Windows installer + update feed)
+        run: npm run package:win -w @kenet/desktop -- --publish never
+
+      - name: GitHub Releases'e yükle
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.exe.blockmap
+            apps/desktop/release/latest.yml
+          fail_on_unmatched_files: false
