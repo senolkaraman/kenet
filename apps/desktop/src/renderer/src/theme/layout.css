@@ -124,7 +124,7 @@
 .remote-surface.controlling { cursor: none; }
 .remote-surface.annotating { cursor: crosshair; }
 .remote-surface.focused { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--brand) 60%, transparent); }
-.remote-surface video { width: 100%; height: 100%; object-fit: contain; }
+.remote-surface video { width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-drag: none; }
 .surface-empty { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--text-2); }
 .focus-hint {
   position: absolute; left: 50%; bottom: 92px; transform: translateX(-50%);

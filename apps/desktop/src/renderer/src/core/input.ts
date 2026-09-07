@@ -19,6 +19,7 @@ export class InputBridge {
   private raf = 0;
   private pending: { x: number; y: number } | null = null;
   private enabled = false;
+  private down: "left" | "right" | "middle" | null = null;
   private readonly cleanups: (() => void)[] = [];
 
   constructor(
@@ -27,6 +28,10 @@ export class InputBridge {
   ) {}
 
   setEnabled(on: boolean): void {
+    if (!on && this.down) {
+      this.emit({ type: "pointer", x: this.pending?.x ?? 0.5, y: this.pending?.y ?? 0.5, button: this.down, down: false });
+      this.down = null;
+    }
     this.enabled = on;
     this.surface.classList.toggle("controlling", on);
   }
@@ -65,15 +70,28 @@ export class InputBridge {
     });
     on(this.surface, "pointerdown", (e: PointerEvent) => {
       if (!this.enabled) return;
-      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      // Without this, pressing on the <video> and moving makes Chromium start a native
+      // image/video drag-and-drop: pointermove stops firing and pointerup never arrives, so the
+      // remote side is left with the mouse button held down mid-drag — the "screen froze" bug.
+      e.preventDefault();
+      this.surface.setPointerCapture?.(e.pointerId);
+      this.down = BUTTONS[e.button] ?? "left";
       const p = this.norm(e);
-      this.emit({ type: "pointer", x: p.x, y: p.y, button: BUTTONS[e.button] ?? "left", down: true });
+      this.emit({ type: "pointer", x: p.x, y: p.y, button: this.down, down: true });
     });
-    on(this.surface, "pointerup", (e: PointerEvent) => {
-      if (!this.enabled) return;
+    const release = (e: PointerEvent) => {
+      if (!this.enabled || !this.down) return;
+      const button = this.down;
+      this.down = null;
       const p = this.norm(e);
-      this.emit({ type: "pointer", x: p.x, y: p.y, button: BUTTONS[e.button] ?? "left", down: false });
-    });
+      this.emit({ type: "pointer", x: p.x, y: p.y, button, down: false });
+    };
+    on(this.surface, "pointerup", release);
+    // If the OS/browser yanks the pointer (drag-and-drop kicked in, window lost focus, tab hidden),
+    // still tell the remote side the button is up so it never stays stuck.
+    on(this.surface, "pointercancel", release);
+    on(this.surface, "lostpointercapture", release);
+    on(this.surface, "dragstart", (e: Event) => e.preventDefault());
     on(this.surface, "contextmenu", (e: Event) => e.preventDefault());
     on(this.surface, "wheel", (e: WheelEvent) => {
       if (!this.enabled) return;

@@ -141,7 +141,7 @@ function ViewerView() {
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
       >
-        <video ref={videoRef} autoPlay playsInline />
+        <video ref={videoRef} autoPlay playsInline draggable={false} />
         {!remoteStream && (
           <div className="surface-empty">
             <span className="spinner" />
