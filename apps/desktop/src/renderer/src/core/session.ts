@@ -304,7 +304,7 @@ export class SessionController {
     if (!req) return;
     window.kenetControl.clearAttention?.();
     try {
-      this.localStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
+      this.localStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 60, max: 60 } }, audio: true });
       this.hintMotion(this.localStream);
     } catch {
       this.set({ message: "Ekran paylaşımı reddedildi." });
@@ -404,6 +404,7 @@ export class SessionController {
     const pc = this.ensurePeer(from);
     if (payload.type === "offer") {
       await pc.setRemoteDescription({ type: "offer", sdp: payload.sdp });
+      this.preferScreenCodec(pc);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       this.signal.signal(from, { type: "answer", sdp: answer.sdp ?? "" });
@@ -1036,34 +1037,53 @@ export class SessionController {
   }
 
   /**
-   * Tell the encoder this is interactive screen content: under load, drop resolution before it
-   * drops frames. Without this, Chromium's default for a screen source is "maintain-resolution",
-   * which freezes the picture for a second or two every time the remote user drags a window.
+   * Screen content, not a webcam: tell the encoder to keep text/edges sharp. contentHint "detail"
+   * asks it to preserve resolution; the maxBitrate ceilings below are what actually let it — the
+   * Chromium default for a screen track tops out around ~2.5 Mbps, which is why the picture looked
+   * soft and banded compared with a purpose-built remote-desktop tool.
    */
   private hintMotion(stream: MediaStream): void {
-    for (const track of stream.getVideoTracks()) track.contentHint = "motion";
+    for (const track of stream.getVideoTracks()) track.contentHint = "detail";
+  }
+
+  /** Put a screen-friendly codec first (H.264 is usually GPU-encoded here; VP9 compresses text
+   *  well). Must run before createAnswer. Best-effort — old APIs / missing codecs are ignored. */
+  private preferScreenCodec(pc: RTCPeerConnection): void {
+    try {
+      const tr = pc.getTransceivers().find((t) => t.sender.track?.kind === "video" || t.receiver.track?.kind === "video");
+      const caps = RTCRtpSender.getCapabilities?.("video");
+      if (!tr || !caps?.codecs || !tr.setCodecPreferences) return;
+      const rank = (m: string) => (/H264/i.test(m) ? 0 : /VP9/i.test(m) ? 1 : /VP8/i.test(m) ? 2 : 3);
+      const ordered = [...caps.codecs].sort((a, b) => rank(a.mimeType) - rank(b.mimeType));
+      tr.setCodecPreferences(ordered);
+    } catch {
+      /* leave codec negotiation to the browser */
+    }
   }
 
   private async applyQuality(mode: "auto" | "sharp" | "smooth"): Promise<void> {
     const sender = this.pc?.getSenders().find((s) => s.track?.kind === "video");
     if (!sender) return;
     const params = sender.getParameters();
-    // Keep the cursor and window drags smooth even mid-encode; resolution recovers when idle.
-    params.degradationPreference = "maintain-framerate";
     params.encodings = params.encodings?.length ? params.encodings : [{}];
     const enc = params.encodings[0];
+    // maxBitrate is a ceiling, not a target — WebRTC's own bandwidth estimator still ramps to
+    // whatever the link actually sustains, so a high ceiling on a weak link just doesn't get used.
     if (mode === "sharp") {
-      enc.maxBitrate = 8_000_000;
-      enc.maxFramerate = 20;
-      enc.scaleResolutionDownBy = 1;
-    } else if (mode === "smooth") {
-      enc.maxBitrate = 2_500_000;
-      enc.maxFramerate = 45;
-      enc.scaleResolutionDownBy = 1.5;
-    } else {
-      enc.maxBitrate = 5_000_000;
+      enc.maxBitrate = 50_000_000;
       enc.maxFramerate = 30;
       enc.scaleResolutionDownBy = 1;
+      params.degradationPreference = "maintain-resolution";
+    } else if (mode === "smooth") {
+      enc.maxBitrate = 8_000_000;
+      enc.maxFramerate = 60;
+      enc.scaleResolutionDownBy = 1.5;
+      params.degradationPreference = "maintain-framerate";
+    } else {
+      enc.maxBitrate = 30_000_000;
+      enc.maxFramerate = 60;
+      enc.scaleResolutionDownBy = 1;
+      params.degradationPreference = "balanced";
     }
     try {
       await sender.setParameters(params);
@@ -1151,7 +1171,7 @@ export class SessionController {
     if (this.get().role !== "host") return;
     try {
       await window.kenetControl.setPreferredScreen?.(id);
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 60, max: 60 } }, audio: true });
       this.hintMotion(stream);
       const nextTrack = stream.getVideoTracks()[0];
       const sender = this.pc?.getSenders().find((s) => s.track?.kind === "video");
