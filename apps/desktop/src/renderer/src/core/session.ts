@@ -107,6 +107,36 @@ const audit = (event: string, details: string) => {
   if (auditLabels.has(event)) window.kenetControl.recordAudit(event, details);
 };
 
+/**
+ * Raise the video bitrate ceilings baked into the SDP. WebRTC starts a screen share at a few
+ * hundred kbps and ramps over several seconds; `x-google-start-bitrate` makes it open near the
+ * real link capacity instead, and the b= lines lift the hard cap Chromium would otherwise apply
+ * to screen content. Runtime caps still come from RTCRtpSender.setParameters (applyQuality).
+ */
+const boostVideoSdp = (sdp: string): string => {
+  if (!sdp.includes("m=video")) return sdp;
+  const START_KBPS = 8000;
+  const MAX_KBPS = 60000;
+  const MIN_KBPS = 800;
+  const out: string[] = [];
+  let inVideo = false;
+  for (const line of sdp.split(/\r\n/)) {
+    if (line.startsWith("m=")) {
+      inVideo = line.startsWith("m=video");
+      out.push(line);
+    } else if (inVideo && line.startsWith("c=")) {
+      out.push(line, `b=AS:${MAX_KBPS}`, `b=TIAS:${MAX_KBPS * 1000}`);
+    } else if (inVideo && /^b=(AS|TIAS):/.test(line)) {
+      /* replaced above */
+    } else if (inVideo && line.startsWith("a=fmtp:") && !line.includes("x-google-")) {
+      out.push(`${line};x-google-start-bitrate=${START_KBPS};x-google-max-bitrate=${MAX_KBPS};x-google-min-bitrate=${MIN_KBPS}`);
+    } else {
+      out.push(line);
+    }
+  }
+  return out.join("\r\n");
+};
+
 export class SessionController {
   readonly store = new Store<SessionState>(initialState);
 
@@ -406,8 +436,9 @@ export class SessionController {
       await pc.setRemoteDescription({ type: "offer", sdp: payload.sdp });
       this.preferScreenCodec(pc);
       const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      this.signal.signal(from, { type: "answer", sdp: answer.sdp ?? "" });
+      const sdp = boostVideoSdp(answer.sdp ?? "");
+      await pc.setLocalDescription({ type: "answer", sdp });
+      this.signal.signal(from, { type: "answer", sdp });
     } else if (payload.type === "answer") {
       await pc.setRemoteDescription({ type: "answer", sdp: payload.sdp });
     } else {
@@ -438,7 +469,19 @@ export class SessionController {
         });
       }
     };
-    pc.ontrack = ({ streams }) => this.set({ remoteStream: streams[0] ?? null });
+    pc.ontrack = (e) => {
+      this.set({ remoteStream: e.streams[0] ?? null });
+      // Shrink the receive-side jitter buffer: on a direct/LAN link the default ~150-200 ms of
+      // buffering is pure added lag. Screen content tolerates the odd late frame far better than
+      // a webcam call would.
+      const r = e.receiver as RTCRtpReceiver & { jitterBufferTarget?: number; playoutDelayHint?: number };
+      try {
+        if ("jitterBufferTarget" in r) r.jitterBufferTarget = 0;
+        if ("playoutDelayHint" in r) r.playoutDelayHint = 0;
+      } catch {
+        /* non-standard knobs — ignore where unsupported */
+      }
+    };
     pc.ondatachannel = ({ channel }) => this.bindChannel(channel);
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "connected") this.onConnected();
@@ -463,8 +506,9 @@ export class SessionController {
     pc.addTransceiver("video", { direction: "recvonly" });
     pc.addTransceiver("audio", { direction: "recvonly" });
     const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    this.signal.signal(route, { type: "offer", sdp: offer.sdp ?? "" });
+    const sdp = boostVideoSdp(offer.sdp ?? "");
+    await pc.setLocalDescription({ type: "offer", sdp });
+    this.signal.signal(route, { type: "offer", sdp });
   }
 
   private onConnected(): void {

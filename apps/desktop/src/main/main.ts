@@ -246,6 +246,23 @@ const createTray = () => {
 
 app.on("second-instance", showWindow);
 
+// --- WebRTC screen-share tuning (must be set before app is ready) ---
+// Let the GPU do H.264 encoding (MediaFoundation) instead of the CPU, and prefer hardware
+// decode on the viewer — this is what keeps a 1080p60 desktop stream smooth without pegging
+// a core. Also allow the encoder to run above WebRTC's timid default screen-share bitrate.
+app.commandLine.appendSwitch(
+  "enable-features",
+  "PlatformHEVCEncoderSupport,MediaFoundationH264Encoding,MediaFoundationVP9Encoding,WebRtcHideLocalIpsWithMdns"
+);
+app.commandLine.appendSwitch("disable-features", "WebRtcAllowLegacyTLSProtocols");
+app.commandLine.appendSwitch("enable-gpu-rasterization");
+app.commandLine.appendSwitch("enable-zero-copy");
+// Chromium throttles renderer timers/rAF when the window is backgrounded — fatal for a host
+// that's minimised to the tray while sharing its screen.
+app.commandLine.appendSwitch("disable-background-timer-throttling");
+app.commandLine.appendSwitch("disable-renderer-backgrounding");
+app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+
 app.whenReady().then(() => {
   startInputAgent();
 
