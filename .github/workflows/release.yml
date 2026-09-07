@@ -19,6 +19,8 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\.cache\electron-builder
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,6 +32,24 @@ jobs:
           dotnet-version: "10.0.x"
           dotnet-quality: preview
 
+      - name: Windows Defender exclusions
+        shell: pwsh
+        run: |
+          if (Get-Command Add-MpPreference -ErrorAction SilentlyContinue) {
+            New-Item -ItemType Directory -Force -Path $env:ELECTRON_BUILDER_CACHE | Out-Null
+            $npmCache = Join-Path $env:LocalAppData "npm-cache"
+            Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, $npmCache, $env:ELECTRON_BUILDER_CACHE
+            Add-MpPreference -ExclusionProcess "app-builder.exe"
+          } else {
+            Write-Host "Windows Defender cmdlets are unavailable on this runner."
+          }
+
+      - name: Cache electron-builder tools
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ELECTRON_BUILDER_CACHE }}
+          key: ${{ runner.os }}-electron-builder-${{ hashFiles('apps/desktop/package.json') }}
+
       - run: npm ci
       # @kenet/protocol ships its runtime entry from dist/ (gitignored); the desktop bundle
       # resolves it, so build it before check / test / package.
@@ -37,11 +57,33 @@ jobs:
       - run: npm run check
       - run: npm test
 
-      # Build only — the exact command that already produces a working installer locally.
-      # electron-builder still writes latest.yml (update feed) because a publish block is
-      # configured in apps/desktop/package.json.
+      # package:win runs dotnet publish + desktop build + electron-builder.
+      # For retries we run prerequisites once and retry electron-builder itself, because
+      # a failed first packaging attempt may leave desktop node_modules in production-only mode.
+      - name: Hazırla (dotnet publish + desktop build)
+        run: dotnet publish apps/windows-agent -c Release && npm run build -w @kenet/desktop
+
       - name: Paketle (Windows installer + update feed)
-        run: npm run package:win -w @kenet/desktop -- --publish never
+        shell: pwsh
+        run: |
+          Push-Location apps/desktop
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-Host "Packaging attempt $attempt/3"
+            npm exec --workspace @kenet/desktop -- electron-builder --win nsis portable --publish never
+            if ($LASTEXITCODE -eq 0) {
+              Pop-Location
+              exit 0
+            }
+
+            if ($attempt -lt 3) {
+              Write-Warning "Packaging failed. Rebuilding app-builder-bin before retry."
+              npm rebuild app-builder-bin --foreground-scripts
+              Start-Sleep -Seconds 5
+            }
+          }
+
+          Pop-Location
+          throw "Packaging failed after 3 attempts."
 
       - name: GitHub Releases'e yükle
         uses: softprops/action-gh-release@v2
