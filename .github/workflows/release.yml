@@ -57,16 +57,21 @@ jobs:
       - run: npm run check
       - run: npm test
 
-      # Build only — the exact command that already produces a working installer locally.
-      # electron-builder still writes latest.yml (update feed) because a publish block is
-      # configured in apps/desktop/package.json.
+      # package:win runs dotnet publish + desktop build + electron-builder.
+      # For retries we run prerequisites once and retry electron-builder itself, because
+      # a failed first packaging attempt may leave desktop node_modules in production-only mode.
+      - name: Hazırla (dotnet publish + desktop build)
+        run: dotnet publish apps/windows-agent -c Release && npm run build -w @kenet/desktop
+
       - name: Paketle (Windows installer + update feed)
         shell: pwsh
         run: |
+          Push-Location apps/desktop
           for ($attempt = 1; $attempt -le 3; $attempt++) {
             Write-Host "Packaging attempt $attempt/3"
-            npm run package:win -w @kenet/desktop -- --publish never
+            npx electron-builder --win nsis portable --publish never
             if ($LASTEXITCODE -eq 0) {
+              Pop-Location
               exit 0
             }
 
@@ -77,6 +82,7 @@ jobs:
             }
           }
 
+          Pop-Location
           throw "Packaging failed after 3 attempts."
 
       - name: GitHub Releases'e yükle
