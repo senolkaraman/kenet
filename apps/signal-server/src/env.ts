@@ -37,6 +37,11 @@ export const env = {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),
+  // How many proxy hops to trust at the tail of X-Forwarded-For. A client can forge the *front*
+  // of that header, but the infrastructure in front of us appends the real connecting IP, so the
+  // trustworthy client IP is the Nth entry counted from the end. Cloud Run direct = 1; behind an
+  // extra external HTTPS load balancer = 2. Set to 0 to ignore XFF entirely (socket IP only).
+  trustedProxyDepth: Math.max(0, Number(process.env.TRUSTED_PROXY_DEPTH ?? 1)),
   resend: {
     apiKey: process.env.RESEND_API_KEY?.trim() ?? "",
     from: process.env.EMAIL_FROM?.trim() || "Kenet <onboarding@resend.dev>"

@@ -144,6 +144,12 @@ describe("account + device lifecycle", () => {
     expect(res.unattendedEnabled).toBe(true);
   });
 
+  it("rejects an unattended password shorter than 8 characters", async () => {
+    const c = ctx({ unattendedPassword: "short" }, token);
+    c.params.id = deviceId;
+    await expect(patchDeviceHandler(c)).rejects.toThrow(/8 karakter/);
+  });
+
   it("issues an unattended ticket for the correct password and rejects a wrong one", async () => {
     const good = ctx({ password: "let-me-in" }, token);
     good.params.id = deviceId;
@@ -340,6 +346,17 @@ describe("rate limiting", () => {
     let allowed = 0;
     for (let i = 0; i < 15; i += 1) if (rateLimit("connreq:admin", 5, 60_000, true)) allowed += 1;
     expect(allowed).toBe(15);
+  });
+
+  it("keys on the infra-appended tail of X-Forwarded-For, not the client-supplied front", async () => {
+    const { clientIp } = await import("./ratelimit.js");
+    // Client forges "1.1.1.1"; Cloud Run appends the real "9.9.9.9". depth=1 must return the real one.
+    expect(clientIp({ "x-forwarded-for": "1.1.1.1, 9.9.9.9" }, "sock", 1)).toBe("9.9.9.9");
+    expect(clientIp({ "x-forwarded-for": "1.1.1.1, 9.9.9.9, 10.0.0.1" }, "sock", 2)).toBe("9.9.9.9");
+    // depth=0 ignores the header entirely.
+    expect(clientIp({ "x-forwarded-for": "1.1.1.1" }, "sock", 0)).toBe("sock");
+    // No header → socket address.
+    expect(clientIp({}, "sock", 1)).toBe("sock");
   });
 });
 

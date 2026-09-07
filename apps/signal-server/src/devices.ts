@@ -114,7 +114,10 @@ export const patchDeviceHandler = async (ctx: Ctx): Promise<DeviceRecord> => {
   }
   if (unattendedPassword === null) {
     await query("update devices set unattended_hash = null where id = $1", [deviceId]);
-  } else if (typeof unattendedPassword === "string" && unattendedPassword.length >= 6) {
+  } else if (typeof unattendedPassword === "string") {
+    if (unattendedPassword.length < 8) {
+      throw new HttpError(400, "Gözetimsiz erişim şifresi en az 8 karakter olmalı.");
+    }
     const { plan } = await resolvePlan(userId);
     if (!limitsFor(plan).unattendedAccess) {
       throw new HttpError(402, "Gözetimsiz erişim Pro ve Ekip planlarında kullanılabilir.");

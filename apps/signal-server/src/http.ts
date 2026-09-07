@@ -95,7 +95,7 @@ export class Router {
       }
 
       try {
-        const ip = clientIp(req.headers, req.socket.remoteAddress ?? undefined);
+        const ip = clientIp(req.headers, req.socket.remoteAddress ?? undefined, env.trustedProxyDepth);
         const result = await route.handler({ req, res, url, params, body, claims, ip });
         if (!res.writableEnded) json(res, 200, result ?? {});
       } catch (error) {

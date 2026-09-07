@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import { WebSocketServer } from "ws";
-import { env } from "./env.js";
+import { env, billingEnabled } from "./env.js";
 import { migrate } from "./db.js";
 import { Router, json } from "./http.js";
 import { verifyToken } from "./jwt.js";
@@ -162,6 +162,12 @@ httpServer.on("upgrade", (req, socket, head) => {
 
 const start = async (): Promise<void> => {
   await migrate();
+  if (billingEnabled() && !env.stripe.webhookSecret) {
+    console.warn(
+      "[billing] STRIPE_SECRET_KEY is set but STRIPE_WEBHOOK_SECRET is missing — every incoming " +
+        "Stripe webhook will be rejected with 400 and plan changes will not sync. Set the secret."
+    );
+  }
   httpServer.listen(env.port, () => console.log(`Kenet backend listening on :${env.port}`));
 };
 

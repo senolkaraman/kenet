@@ -27,9 +27,25 @@ setInterval(() => {
   }
 }, 600_000).unref();
 
-export const clientIp = (headers: Record<string, string | string[] | undefined>, socketAddr?: string): string => {
-  const forwarded = headers["x-forwarded-for"];
-  if (typeof forwarded === "string") return forwarded.split(",")[0]!.trim();
-  if (Array.isArray(forwarded) && forwarded[0]) return forwarded[0].split(",")[0]!.trim();
+/**
+ * Resolves the real client IP for rate-limiting. `X-Forwarded-For` is client-writable at the
+ * *front* — a script can send `X-Forwarded-For: 1.2.3.4` to try to spread its hits across fake
+ * keys. The proxy/infra in front of us appends the actual connecting address, so the trustworthy
+ * value is the `depth`-th entry counted from the end (Cloud Run direct = 1). `depth = 0` disables
+ * XFF parsing and keys purely on the socket address.
+ */
+export const clientIp = (
+  headers: Record<string, string | string[] | undefined>,
+  socketAddr?: string,
+  depth = 1
+): string => {
+  if (depth > 0) {
+    const raw = headers["x-forwarded-for"];
+    const header = Array.isArray(raw) ? raw.join(",") : raw;
+    if (typeof header === "string") {
+      const parts = header.split(",").map((s) => s.trim()).filter(Boolean);
+      if (parts.length) return parts[Math.max(0, parts.length - depth)]!;
+    }
+  }
   return socketAddr ?? "unknown";
 };
