@@ -21,6 +21,7 @@ export function SidePanel({ onClose }: { onClose: () => void }) {
   const startedAt = useStore(session.store, (s) => s.startedAt);
   const [draft, setDraft] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [sendingClip, setSendingClip] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -105,6 +106,22 @@ export function SidePanel({ onClose }: { onClose: () => void }) {
           <Button block variant="subtle" onClick={() => fileRef.current?.click()}>
             <Icon name="plus" /> Dosya gönder ya da buraya sürükle
           </Button>
+          <Button
+            block
+            variant="ghost"
+            disabled={sendingClip}
+            title="Kendi bilgisayarında kopyaladığın dosyayı karşı tarafın panosuna koyar — sonra orada Ctrl+V / Yapıştır"
+            onClick={async () => {
+              setSendingClip(true);
+              try {
+                await session.sendClipboardFiles();
+              } finally {
+                setSendingClip(false);
+              }
+            }}
+          >
+            {sendingClip ? <span className="spinner" /> : <Icon name="clipboard" />} Panomdaki dosyayı karşıya yapıştır
+          </Button>
           <div className="transfer-list">
             {transfers.length === 0 && <p className="muted center">Henüz aktarım yok.</p>}
             {transfers.map((t) => (
@@ -114,6 +131,9 @@ export function SidePanel({ onClose }: { onClose: () => void }) {
                   <span className="transfer-name">{t.name}</span>
                   <span className="transfer-meta">
                     {t.direction === "in" ? "Gelen" : "Giden"} · {fmtBytes(t.size)}
+                    {t.state === "offered" && t.direction === "out" && " · onay bekleniyor"}
+                    {t.state === "offered" && t.direction === "in" && " · yanıt bekliyor"}
+                    {t.state === "active" && " · aktarılıyor"}
                     {t.state === "rejected" && " · reddedildi"}
                     {t.state === "done" && " · tamam"}
                   </span>

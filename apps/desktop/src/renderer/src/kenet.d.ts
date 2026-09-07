@@ -24,6 +24,7 @@ interface Window {
     recordAudit(event: string, details: string): void;
     listAudit(): Promise<Array<{ timestamp: string; event: string; details: string }>>;
     notifyIncoming?(name: string): void;
+    notifyIncomingFile?(name: string, from?: string): void;
     clearAttention?(): void;
     readClipboard?(): Promise<string>;
     writeClipboard?(text: string): Promise<void>;

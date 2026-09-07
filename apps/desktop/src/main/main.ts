@@ -288,6 +288,23 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.on("session:attention-clear", () => mainWindow?.flashFrame(false));
+
+  // The connected peer is pushing a file to us. It auto-saves into Downloads (the connection was
+  // already approved), so this is a heads-up, not a prompt — but make it visible even from the tray.
+  ipcMain.on("session:incoming-file", (_event, payload: { name?: unknown; from?: unknown }) => {
+    const name = typeof payload?.name === "string" && payload.name.trim() ? payload.name.trim().slice(0, 80) : "Bir dosya";
+    const from = typeof payload?.from === "string" && payload.from.trim() ? payload.from.trim().slice(0, 40) : null;
+    if (!Notification.isSupported()) return;
+    const note = new Notification({
+      title: "Kenet — dosya alınıyor",
+      body: from
+        ? `${from}, "${name}" dosyasını gönderdi. İndirilenler klasörüne kaydediliyor.`
+        : `"${name}" alınıyor — İndirilenler klasörüne kaydedilecek.`,
+      icon: iconPath()
+    });
+    note.on("click", () => shell.openPath(app.getPath("downloads")));
+    note.show();
+  });
   ipcMain.handle("audit:list", async () => {
     try {
       return (await readFile(auditPath(), "utf8"))

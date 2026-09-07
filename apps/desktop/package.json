@@ -1,6 +1,6 @@
 {
   "name": "@kenet/desktop",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "private": true,
   "main": "dist/main/main.js",
   "scripts": {
@@ -63,6 +63,13 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "senolkaraman",
+        "repo": "kenet"
+      }
+    ]
   }
 }

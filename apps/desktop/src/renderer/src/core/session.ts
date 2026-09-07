@@ -596,6 +596,12 @@ export class SessionController {
         void window.kenetControl.writeClipboard?.(message.text);
         break;
       case "file-offer": {
+        // A plain "send file" always lands on the host, which has no accept UI while its screen
+        // is being viewed — and the connection itself was already approved. So the host auto-
+        // accepts it straight into its Downloads folder (200 MB cap still applies) and shows an
+        // OS notification. The viewer side keeps the manual Al/Yok prompt (SidePanel has it).
+        const plainOffer = !message.clipboardBatch && !message.remoteWritePath && !message.autoSaveDownload;
+        const hostAutoSave = plainOffer && this.get().role === "host";
         this.incoming = {
           id: message.id,
           name: message.name,
@@ -604,12 +610,15 @@ export class SessionController {
           chunks: [],
           clipboardBatch: message.clipboardBatch,
           remoteWritePath: message.remoteWritePath,
-          autoSaveDownload: message.autoSaveDownload
+          autoSaveDownload: message.autoSaveDownload || hostAutoSave
         };
         // Clipboard-paste transfers are fully silent (no Dosyalar entry either). File-manager
         // uploads/downloads still show up in the list for visibility, just pre-accepted —
         // the human already made the decision by clicking upload/download.
-        const autoAccept = Boolean(message.clipboardBatch || message.remoteWritePath || message.autoSaveDownload);
+        const autoAccept = Boolean(message.clipboardBatch || message.remoteWritePath || message.autoSaveDownload || hostAutoSave);
+        if (hostAutoSave) {
+          window.kenetControl.notifyIncomingFile?.(message.name, this.get().peerName ?? undefined);
+        }
         if (!message.clipboardBatch) {
           this.set((s) => ({
             transfers: [
@@ -739,6 +748,16 @@ export class SessionController {
       remoteWritePath: opts?.remoteWritePath,
       autoSaveDownload: opts?.autoSaveDownload
     });
+    // If the other side never answers (window closed, no accept UI reachable), don't leave the
+    // transfer hanging as "Giden…" forever — give up after 90 s with a clear message.
+    window.setTimeout(() => {
+      const cur = this.get().transfers.find((x) => x.id === id);
+      if (cur?.state === "offered" && cur.direction === "out") {
+        this.updateTransfer(id, { state: "rejected" });
+        this.set({ message: "Karşı taraf dosya isteğine yanıt vermedi." });
+        if (this.outgoingFile?.id === id) this.outgoingFile = undefined;
+      }
+    }, 90_000);
   }
 
   // ---------- remote file manager (viewer browses the host's disk) ----------

@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("kenetControl", {
   recordAudit: (event: string, details: string) => ipcRenderer.send("audit:record", { event, details }),
   listAudit: () => ipcRenderer.invoke("audit:list"),
   notifyIncoming: (name: string) => ipcRenderer.send("session:incoming", name),
+  notifyIncomingFile: (name: string, from?: string) => ipcRenderer.send("session:incoming-file", { name, from }),
   clearAttention: () => ipcRenderer.send("session:attention-clear"),
   readClipboard: () => ipcRenderer.invoke("clipboard:read") as Promise<string>,
   writeClipboard: (text: string) => ipcRenderer.invoke("clipboard:write", text) as Promise<void>,

@@ -10,6 +10,12 @@ import { SidePanel } from "./SidePanel";
 import { SafetyCodeButton } from "../components/SafetyCode";
 import { RecordButton } from "../components/RecordButton";
 
+const fmtBytes = (n: number): string => {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+};
+
 export function Session() {
   const role = useStore(session.store, (s) => s.role);
   const phase = useStore(session.store, (s) => s.phase);
@@ -174,6 +180,7 @@ function HostView() {
   const privacyActive = useStore(session.store, (s) => s.privacyActive);
   const unattended = useStore(session.store, (s) => s.unattendedSession);
   const stats = useStore(session.store, (s) => s.stats);
+  const transfers = useStore(session.store, (s) => s.transfers);
   const [screens, setScreens] = useState<Array<{ id: string; label: string; thumbnail: string }>>([]);
   const [sendingClipboardFiles, setSendingClipboardFiles] = useState(false);
 
@@ -243,6 +250,23 @@ function HostView() {
               <Icon name="power" size={15} /> Oturumu sonlandır
             </Button>
           </div>
+
+          {transfers.length > 0 && (
+            <div className="host-transfers">
+              <h4><Icon name="file" size={13} /> Dosya aktarımları</h4>
+              {transfers.slice(-5).map((t) => (
+                <div key={t.id} className="stat-row">
+                  <span title={t.name}>{t.name}</span>
+                  <strong>
+                    {fmtBytes(t.size)}
+                    {t.state === "active" && " · alınıyor"}
+                    {t.state === "done" && " · İndirilenler'e kaydedildi"}
+                    {t.state === "rejected" && " · başarısız"}
+                  </strong>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="card host-side">
