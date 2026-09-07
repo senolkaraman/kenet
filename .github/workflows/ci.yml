@@ -19,6 +19,9 @@ jobs:
           dotnet-version: "10.0.x"
           dotnet-quality: preview
       - run: npm ci
+      # @kenet/protocol ships its runtime entry from dist/ (gitignored); dependents' bundled
+      # builds resolve it, so build it before the steps that need it.
+      - run: npm run build -w @kenet/protocol
       - run: npm run check
       - run: npm test
       - run: npm run build

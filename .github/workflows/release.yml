@@ -31,6 +31,9 @@ jobs:
           dotnet-quality: preview
 
       - run: npm ci
+      # @kenet/protocol ships its runtime entry from dist/ (gitignored); the desktop bundle
+      # resolves it, so build it before check / test / package.
+      - run: npm run build -w @kenet/protocol
       - run: npm run check
       - run: npm test
 
