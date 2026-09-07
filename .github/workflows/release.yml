@@ -19,6 +19,8 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\.cache\electron-builder
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,6 +31,24 @@ jobs:
         with:
           dotnet-version: "10.0.x"
           dotnet-quality: preview
+
+      - name: Windows Defender exclusions
+        shell: pwsh
+        run: |
+          if (Get-Command Add-MpPreference -ErrorAction SilentlyContinue) {
+            New-Item -ItemType Directory -Force -Path $env:ELECTRON_BUILDER_CACHE | Out-Null
+            $npmCache = Join-Path $env:LocalAppData "npm-cache"
+            Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, $npmCache, $env:ELECTRON_BUILDER_CACHE
+            Add-MpPreference -ExclusionProcess "app-builder.exe"
+          } else {
+            Write-Host "Windows Defender cmdlets are unavailable on this runner."
+          }
+
+      - name: Cache electron-builder tools
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ELECTRON_BUILDER_CACHE }}
+          key: ${{ runner.os }}-electron-builder-${{ hashFiles('apps/desktop/package.json') }}
 
       - run: npm ci
       # @kenet/protocol ships its runtime entry from dist/ (gitignored); the desktop bundle
@@ -41,7 +61,23 @@ jobs:
       # electron-builder still writes latest.yml (update feed) because a publish block is
       # configured in apps/desktop/package.json.
       - name: Paketle (Windows installer + update feed)
-        run: npm run package:win -w @kenet/desktop -- --publish never
+        shell: pwsh
+        run: |
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-Host "Packaging attempt $attempt/3"
+            npm run package:win -w @kenet/desktop -- --publish never
+            if ($LASTEXITCODE -eq 0) {
+              exit 0
+            }
+
+            if ($attempt -lt 3) {
+              Write-Warning "Packaging failed. Rebuilding app-builder-bin before retry."
+              npm rebuild app-builder-bin --foreground-scripts
+              Start-Sleep -Seconds 5
+            }
+          }
+
+          throw "Packaging failed after 3 attempts."
 
       - name: GitHub Releases'e yükle
         uses: softprops/action-gh-release@v2
