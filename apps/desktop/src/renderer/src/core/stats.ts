@@ -6,6 +6,8 @@ export interface LinkStats {
   height: number | null;
   transport: "direct" | "relay" | "unknown";
   packetLoss: number | null;
+  /** Host side: why the encoder is degrading, if it is — "cpu" | "bandwidth" | "other". */
+  limited?: string | null;
 }
 
 export const emptyStats: LinkStats = {
@@ -15,7 +17,8 @@ export const emptyStats: LinkStats = {
   width: null,
   height: null,
   transport: "unknown",
-  packetLoss: null
+  packetLoss: null,
+  limited: null
 };
 
 /** Polls RTCPeerConnection.getStats and derives a human-readable link summary. */
@@ -81,6 +84,30 @@ export class StatsProbe {
           this.lastLost = rtp.packetsLost;
           this.lastPackets = rtp.packetsReceived;
         }
+      }
+      // Host side has no inbound video — read the send stats instead so "Gönderim" / fps / resolution
+      // actually reflect what the encoder is doing (and surface when it's falling behind).
+      if (entry.type === "outbound-rtp" && (entry as RTCOutboundRtpStreamStats).kind === "video") {
+        const rtp = entry as RTCOutboundRtpStreamStats & {
+          bytesSent?: number;
+          timestamp: number;
+          framesPerSecond?: number;
+          frameWidth?: number;
+          frameHeight?: number;
+          qualityLimitationReason?: string;
+        };
+        if (rtp.bytesSent != null && this.lastTs) {
+          const dt = (rtp.timestamp - this.lastTs) / 1000;
+          if (dt > 0) next.kbps = Math.max(0, Math.round(((rtp.bytesSent - this.lastBytes) * 8) / 1000 / dt));
+        }
+        this.lastBytes = rtp.bytesSent ?? this.lastBytes;
+        this.lastTs = rtp.timestamp;
+        if (rtp.framesPerSecond != null) next.fps = Math.round(rtp.framesPerSecond);
+        next.width = rtp.frameWidth ?? next.width;
+        next.height = rtp.frameHeight ?? next.height;
+        next.limited = rtp.qualityLimitationReason && rtp.qualityLimitationReason !== "none"
+          ? rtp.qualityLimitationReason
+          : null;
       }
       if (entry.type === "candidate-pair") candidatePairs.set(entry.id, entry as RTCIceCandidatePairStats);
       if (entry.type === "local-candidate" || entry.type === "remote-candidate") {

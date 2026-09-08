@@ -272,7 +272,13 @@ function HostView() {
         <div className="card host-side">
           <div className="stat-row"><span>Gecikme</span><strong>{rtt}</strong></div>
           <div className="stat-row"><span>Gönderim</span><strong>{stats.kbps != null ? `${(stats.kbps / 1000).toFixed(1)} Mbps` : "—"}</strong></div>
+          <div className="stat-row"><span>Kare / çözünürlük</span><strong>{stats.fps != null ? `${stats.fps} fps` : "—"}{stats.width ? ` · ${stats.width}×${stats.height}` : ""}</strong></div>
           <div className="stat-row"><span>Bağlantı</span><strong>{stats.transport === "relay" ? "TURN" : stats.transport === "direct" ? "P2P" : "—"}</strong></div>
+          {stats.limited && (
+            <div className="stat-row"><span>Sınırlayan</span><strong style={{ color: "var(--warn)" }}>
+              {stats.limited === "cpu" ? "İşlemci (encode yetişemiyor)" : stats.limited === "bandwidth" ? "Bant genişliği" : stats.limited}
+            </strong></div>
+          )}
           {screens.length > 0 && (
             <>
               <h4 style={{ marginTop: 16 }}>Paylaşılabilir monitörler</h4>
