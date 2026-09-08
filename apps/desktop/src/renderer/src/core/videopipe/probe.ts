@@ -104,3 +104,42 @@ export const probeLocalVideoCodec: ProbeFn = async (choice, width, height) => {
     hardware
   };
 };
+
+export interface LocalVideoCaps {
+  /** codecs this machine can hardware-encode */
+  encodeHw: string[];
+  /** codecs this machine can hardware-decode */
+  decodeHw: string[];
+  /** codecs it can encode at all */
+  encodeSw: string[];
+  decodeSw: string[];
+}
+
+/** Probe every candidate once and bucket the results — cheap (isConfigSupported, no real codec). */
+export const probeLocalCaps = async (
+  width = 1920,
+  height = 1080,
+  probe: ProbeFn = probeLocalVideoCodec
+): Promise<LocalVideoCaps> => {
+  const caps: LocalVideoCaps = { encodeHw: [], decodeHw: [], encodeSw: [], decodeSw: [] };
+  for (const choice of CODEC_CANDIDATES) {
+    let s: CodecSupport;
+    try {
+      s = await probe(choice, width, height);
+    } catch {
+      continue;
+    }
+    if (s.encode) {
+      caps.encodeSw.push(choice.codec);
+      if (s.hardware) caps.encodeHw.push(choice.codec);
+    }
+    if (s.decode) {
+      caps.decodeSw.push(choice.codec);
+      if (s.hardware) caps.decodeHw.push(choice.codec);
+    }
+  }
+  return caps;
+};
+
+export const choiceForCodec = (codec: string): CodecChoice | undefined =>
+  CODEC_CANDIDATES.find((c) => c.codec === codec);
