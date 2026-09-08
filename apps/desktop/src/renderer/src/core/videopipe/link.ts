@@ -222,7 +222,8 @@ export class VideoLink {
         this.encStats = st;
         this.pushStats();
       },
-      onError: (err) => this.fallback(`encoder: ${err.message}`)
+      onError: (err) => this.fallback(`encoder: ${err.message}`),
+      onDiag: (line) => this.hooks.onDiag?.(line)
     });
     this.encoder.start(track, choice, this.rate.state, { hardware: this.hardware }).catch((err: unknown) => {
       this.fallback(`encoder start: ${err instanceof Error ? err.message : String(err)}`);

@@ -35,7 +35,13 @@ export const decideVideoPath = (
   if (!wantHw) {
     const encSw = new Set([...(hostEncode.sw ?? []), ...hostEncode.hw]);
     const decSw = new Set([...(viewerDecode.sw ?? []), ...viewerDecode.hw]);
-    for (const choice of CODEC_CANDIDATES) {
+    // Software path: VP8 first — libvpx real-time VP8 is the fastest software encoder by a wide
+    // margin, which is what actually matters when there's no GPU to lean on.
+    const swOrder = [
+      ...CODEC_CANDIDATES.filter((c) => /vp8/i.test(c.codec)),
+      ...CODEC_CANDIDATES.filter((c) => !/vp8/i.test(c.codec))
+    ];
+    for (const choice of swOrder) {
       if (encSw.has(choice.codec) && decSw.has(choice.codec)) {
         return { mode: "webcodecs", codec: choice.codec, choice, hardware: false };
       }

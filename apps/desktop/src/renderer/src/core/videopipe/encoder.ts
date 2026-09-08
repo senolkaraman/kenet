@@ -18,6 +18,7 @@ export interface ScreenEncoderHooks {
   onChunk: (frame: ChunkFrame) => void;
   onStats?: (s: EncoderStats) => void;
   onError?: (err: Error) => void;
+  onDiag?: (line: string) => void;
 }
 
 interface RateTarget {
@@ -49,10 +50,17 @@ export class ScreenEncoder {
   private choice: CodecChoice | undefined;
   private width = 0;
   private height = 0;
+  private srcWidth = 0;
+  private srcHeight = 0;
   private preferHardware = false;
+  private captureKind: "trackprocessor" | "video-element" = "trackprocessor";
+  /** encode at 1 / scale of the captured resolution — raised when the encoder can't keep 25 fps */
+  private scale = 1;
   private lastEncodeMs = 0;
   private lastConfigMs = 0;
   private lastConfigJson = "";
+  private lastAdaptMs = 0;
+  private encodedInWindow = 0;
   private resizeDebounce: number | undefined;
   private statsTimer: number | undefined;
 
@@ -74,9 +82,13 @@ export class ScreenEncoder {
     this.choice = choice;
     this.target = { ...initial };
     this.preferHardware = opts.hardware ?? false;
+    // Software encoders can't do 30 fps at native laptop-panel resolution — start already scaled
+    // down and let adapt() walk it back toward 1:1 if the CPU turns out to have headroom.
+    this.scale = opts.hardware ? 1 : 1.5;
     const s = track.getSettings();
-    this.width = clampDim(s.width ?? 1280);
-    this.height = clampDim(s.height ?? 720);
+    this.srcWidth = clampDim(s.width ?? 1280);
+    this.srcHeight = clampDim(s.height ?? 720);
+    this.applyScale();
 
     this.encoder = new VideoEncoder({
       output: (chunk, meta) => this.onEncoded(chunk, meta),
@@ -91,14 +103,16 @@ export class ScreenEncoder {
     const Processor = (globalThis as typeof globalThis & { MediaStreamTrackProcessor?: typeof MediaStreamTrackProcessor })
       .MediaStreamTrackProcessor;
     if (Processor) {
+      // Best path — reads frames straight off the track, unaffected by window visibility.
+      this.captureKind = "trackprocessor";
       const proc = new Processor({ track });
       this.reader = (proc.readable as ReadableStream<VideoFrame>).getReader();
       void this.pump();
     } else {
-      // MediaStreamTrackProcessor is behind a flag in some Chromium builds — capture off a
-      // <video> element with requestVideoFrameCallback instead, which needs no flag.
+      this.captureKind = "video-element";
       await this.startVideoElementCapture(track);
     }
+    this.hooks.onDiag?.(`capture: ${this.captureKind}`);
 
     this.statsTimer = window.setInterval(() => this.emitStats(), 1000);
   }
@@ -168,6 +182,38 @@ export class ScreenEncoder {
     this.encoder = undefined;
   }
 
+  private applyScale(): void {
+    this.width = clampDim(this.srcWidth / this.scale);
+    this.height = clampDim(this.srcHeight / this.scale);
+  }
+
+  private reconfigureSafely(): void {
+    try {
+      this.configureEncoder(false);
+    } catch (e) {
+      this.hooks.onError?.(e instanceof Error ? e : new Error(String(e)));
+    }
+  }
+
+  /** Once per second: nudge the encode resolution so we hold ~25 fps on whatever CPU this is. */
+  private adapt(): void {
+    const fps = this.encodedInWindow;
+    this.encodedInWindow = 0;
+    const now = performance.now();
+    if (now - this.lastAdaptMs < 3000) return;
+    const queueOk = (this.encoder?.encodeQueueSize ?? 0) < MAX_QUEUE - 1;
+    if (fps < 20 && this.scale < 3) {
+      this.scale = Math.min(3, this.scale + 0.5);
+    } else if (fps >= 27 && queueOk && this.scale > 1) {
+      this.scale = Math.max(1, this.scale - 0.5);
+    } else {
+      return;
+    }
+    this.lastAdaptMs = now;
+    this.applyScale();
+    this.reconfigureSafely();
+  }
+
   private configureEncoder(first: boolean): void {
     if (!this.encoder || !this.choice) return;
     this.lastConfigMs = performance.now();
@@ -231,29 +277,27 @@ export class ScreenEncoder {
       return; // encoder is behind — skip rather than pile up latency
     }
 
-    // Resolution can change (monitor switch, DPI). Encode this frame at whatever size it is, but
-    // only *reconfigure* the encoder once the size has held steady for 400ms — reconfiguring on
-    // every frame during a window resize is exactly what triggers "Encoder creation error".
-    if (frame.displayWidth && (frame.displayWidth !== this.width || frame.displayHeight !== this.height)) {
+    // The captured resolution can change (monitor switch, DPI). VideoEncoder auto-scales the input
+    // frame to its configured size, so just encode as-is and only *reconfigure* once the source
+    // size has held steady for 400ms — reconfiguring per frame during a resize crashes the encoder.
+    if (frame.displayWidth && frame.displayWidth !== this.srcWidth) {
       const nw = clampDim(frame.displayWidth);
       const nh = clampDim(frame.displayHeight);
       if (this.resizeDebounce !== undefined) window.clearTimeout(this.resizeDebounce);
       this.resizeDebounce = window.setTimeout(() => {
         this.resizeDebounce = undefined;
-        if (nw === this.width && nh === this.height) return;
-        this.width = nw;
-        this.height = nh;
-        try {
-          this.configureEncoder(false);
-        } catch (e) {
-          this.hooks.onError?.(e instanceof Error ? e : new Error(String(e)));
-        }
+        if (nw === this.srcWidth) return;
+        this.srcWidth = nw;
+        this.srcHeight = nh;
+        this.applyScale();
+        this.reconfigureSafely();
       }, 400);
     }
 
     try {
       const key = this.keyframes.due(now);
       this.encoder.encode(frame, { keyFrame: key });
+      this.encodedInWindow += 1;
       this.lastEncodeMs = now;
     } catch {
       /* encoder not ready between (re)configures — skip this frame */
@@ -290,6 +334,7 @@ export class ScreenEncoder {
   }
 
   private emitStats(): void {
+    this.adapt();
     if (!this.hooks.onStats) return;
     const fps = this.framesSinceStat;
     const bitrateKbps = Math.round((this.bytesSinceStat * 8) / 1000);
@@ -303,7 +348,7 @@ export class ScreenEncoder {
       width: this.width,
       height: this.height,
       codec: this.choice?.label ?? "?",
-      hardware: true
+      hardware: this.preferHardware
     });
   }
 }
