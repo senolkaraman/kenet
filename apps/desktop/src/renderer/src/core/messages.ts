@@ -47,7 +47,11 @@ export type DataMessage =
   | { type: "fs-download"; reqId: string; path: string }
   | { type: "fs-download-error"; reqId: string; error: string }
   // ---- on-screen annotation: the viewer draws, it appears live on the host's real screen ----
-  | { type: "annotate"; strokeId: string; x: number; y: number; phase: "start" | "move" | "end" };
+  | { type: "annotate"; strokeId: string; x: number; y: number; phase: "start" | "move" | "end" }
+  // ---- WebCodecs video path negotiation (the encoded frames themselves ride the "kenet-video"
+  //      data channel as binary, not here) ----
+  | { type: "video-caps"; caps: unknown }
+  | { type: "video-mode"; mode: "webrtc" | "webcodecs"; codec?: string; from?: "host" | "viewer"; why?: string };
 
 export const encode = (m: DataMessage): string => JSON.stringify(m);
 export const decode = (raw: string): DataMessage | null => {

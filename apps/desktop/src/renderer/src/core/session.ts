@@ -7,6 +7,7 @@ import { settingsStore } from "./settings";
 import { authStore } from "./auth";
 import { api } from "./api";
 import { refreshDevices } from "./devices";
+import { VideoLink, type VideoMode, type VideoLinkStats } from "./videopipe/link";
 
 export type Phase =
   | "offline"
@@ -50,6 +51,9 @@ export interface SessionState {
   transfers: Transfer[];
   incoming: { from: string; name: string; requestId: string; fromDevice?: string } | null;
   remoteStream: MediaStream | null;
+  /** "webcodecs" once the GPU-encoded path takes over; "webrtc" is the always-available baseline. */
+  videoMode: VideoMode;
+  videoStats: VideoLinkStats | null;
   controlOffered: boolean;
   controlActive: boolean;
   privacyActive: boolean;
@@ -84,6 +88,8 @@ const initialState: SessionState = {
   transfers: [],
   incoming: null,
   remoteStream: null,
+  videoMode: "webrtc",
+  videoStats: null,
   controlOffered: false,
   controlActive: false,
   privacyActive: false,
@@ -179,6 +185,9 @@ export class SessionController {
   private lastClipboardText = "";
   private idleTimer: number | undefined;
   private lastActivityAt = 0;
+  private videoLink: VideoLink | undefined;
+  private videoSender: RTCRtpSender | undefined;
+  private videoCanvas: HTMLCanvasElement | null = null;
 
   /** Viewer-side: nudge the host's encoder down on sustained poor links, back up when it recovers. */
   private adaptQuality(grade: "ok" | "warn" | "bad"): void {
@@ -482,14 +491,20 @@ export class SessionController {
         /* non-standard knobs — ignore where unsupported */
       }
     };
-    pc.ondatachannel = ({ channel }) => this.bindChannel(channel);
+    pc.ondatachannel = ({ channel }) => {
+      if (channel.label === "kenet-video") this.videoLink?.attachVideoChannel(channel);
+      else this.bindChannel(channel);
+    };
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "connected") this.onConnected();
       else if (pc.connectionState === "disconnected" || pc.connectionState === "failed") this.onDropped();
     };
 
     if (this.localStream) {
-      for (const track of this.localStream.getTracks()) pc.addTrack(track, this.localStream);
+      for (const track of this.localStream.getTracks()) {
+        const sender = pc.addTrack(track, this.localStream);
+        if (track.kind === "video") this.videoSender = sender;
+      }
     }
 
     this.probe = new StatsProbe(pc, (stats) => {
@@ -615,6 +630,32 @@ export class SessionController {
     channel.onclose = () => {
       this.channel = undefined;
     };
+    const spinUpVideoLink = () => {
+      if (this.videoLink || this.pc === undefined || this.get().role === "idle") return;
+      if (typeof VideoEncoder === "undefined" && typeof VideoDecoder === "undefined") return;
+      const link = new VideoLink({
+        role: this.get().role === "host" ? "host" : "viewer",
+        pc: this.pc,
+        sendControl: (msg) => this.send(msg as DataMessage),
+        getScreenTrack: () => this.localStream?.getVideoTracks()[0] ?? null,
+        getVideoSender: () => this.videoSender ?? null,
+        getCanvas: () => this.videoCanvas,
+        onMode: (mode, reason) => {
+          this.set({ videoMode: mode });
+          if (reason) this.set({ message: mode === "webcodecs" ? "Donanım hızlandırmalı görüntü etkin." : `Görüntü klasik moda döndü (${reason}).` });
+        },
+        onStats: (s) => this.set({ videoStats: s })
+      });
+      this.videoLink = link;
+      void link.start();
+    };
+    if (channel.readyState === "open") spinUpVideoLink();
+    else channel.addEventListener("open", spinUpVideoLink, { once: true });
+  }
+
+  /** Viewer's <canvas> for the WebCodecs path — ViewerView wires this via a ref callback. */
+  setVideoCanvas(el: HTMLCanvasElement | null): void {
+    this.videoCanvas = el;
   }
 
   private send(message: DataMessage): void {
@@ -626,6 +667,10 @@ export class SessionController {
     switch (message.type) {
       case "bye":
         this.endSession("Karşı taraf oturumu sonlandırdı.");
+        break;
+      case "video-caps":
+      case "video-mode":
+        this.videoLink?.onControlMessage(message);
         break;
       case "chat":
         this.set((s) => ({
@@ -1176,7 +1221,14 @@ export class SessionController {
    *  balloon in renderer memory. Nothing about this touches the peer or the signalling server. */
   async startRecording(): Promise<{ ok: boolean; error?: string }> {
     if (this.recorder) return { ok: false, error: "Zaten kayıt yapılıyor." };
-    const stream = this.get().role === "host" ? this.localStream : (this.get().remoteStream ?? undefined);
+    let stream = this.get().role === "host" ? this.localStream : (this.get().remoteStream ?? undefined);
+    // Viewer on the WebCodecs path sees frames on a <canvas>, not in remoteStream — record that,
+    // and mix in the (still WebRTC) remote audio track if there is one.
+    if (this.get().role !== "host" && this.get().videoMode === "webcodecs" && this.videoCanvas) {
+      const canvasStream = this.videoCanvas.captureStream(30);
+      for (const a of this.get().remoteStream?.getAudioTracks() ?? []) canvasStream.addTrack(a);
+      stream = canvasStream;
+    }
     if (!stream) return { ok: false, error: "Kaydedilecek görüntü yok." };
 
     const name = `Kenet-${(this.get().peerName ?? "oturum").replace(/[^\w-]+/g, "_")}-${Date.now()}`;
@@ -1220,9 +1272,11 @@ export class SessionController {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 30 } }, audio: true });
       this.hintMotion(stream);
       const nextTrack = stream.getVideoTracks()[0];
-      const sender = this.pc?.getSenders().find((s) => s.track?.kind === "video");
-      if (sender && nextTrack) {
-        await sender.replaceTrack(nextTrack);
+      const sender = this.videoSender ?? this.pc?.getSenders().find((s) => s.track?.kind === "video");
+      if (nextTrack) {
+        // WebCodecs path: the RTP sender is parked (track null) — feed the encoder instead.
+        if (this.get().videoMode === "webcodecs") this.videoLink?.swapScreenTrack(nextTrack);
+        else await sender?.replaceTrack(nextTrack);
         this.localStream?.getVideoTracks().forEach((t) => t.stop());
         this.localStream = stream;
       }
@@ -1248,6 +1302,9 @@ export class SessionController {
     this.peerDeviceId = undefined;
     this.probe?.stop();
     this.probe = undefined;
+    this.videoLink?.stop();
+    this.videoLink = undefined;
+    this.videoSender = undefined;
     this.channel?.close();
     this.channel = undefined;
     this.pc?.close();
@@ -1273,6 +1330,8 @@ export class SessionController {
       peerRoute: null,
       peerName: null,
       remoteStream: null,
+      videoMode: "webrtc",
+      videoStats: null,
       controlOffered: false,
       controlActive: false,
       privacyActive: false,

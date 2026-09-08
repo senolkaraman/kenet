@@ -21,6 +21,8 @@ export function RemoteToolbar({ bridge, fullscreen, onToggleFullscreen, annotati
   const controlActive = useStore(session.store, (s) => s.controlActive);
   const controlOffered = useStore(session.store, (s) => s.controlOffered);
   const stats = useStore(session.store, (s) => s.stats);
+  const videoMode = useStore(session.store, (s) => s.videoMode);
+  const videoStats = useStore(session.store, (s) => s.videoStats);
   const quality = useStore(session.store, (s) => s.quality);
   const qualityMode = useStore(settingsStore, (s) => s.quality);
   const [screensOpen, setScreensOpen] = useState(false);
@@ -55,13 +57,22 @@ export function RemoteToolbar({ bridge, fullscreen, onToggleFullscreen, annotati
 
   return (
     <div className="remote-toolbar" onMouseDown={(e) => e.stopPropagation()}>
-      <span className={`link-pill ${quality}`} title="Bağlantı kalitesi">
+      <span
+        className={`link-pill ${quality}`}
+        title={videoMode === "webcodecs" ? `Donanım hızlandırmalı: ${videoStats?.codec ?? "video"}` : "Bağlantı kalitesi"}
+      >
         <Icon name="wifi" size={14} />
         {stats.rttMs != null ? `${stats.rttMs} ms` : "—"}
         <span className="sep" />
-        {stats.fps != null ? `${stats.fps} fps` : "—"}
+        {videoMode === "webcodecs" ? `${videoStats?.fps ?? 0} fps` : stats.fps != null ? `${stats.fps} fps` : "—"}
         <span className="sep" />
-        {stats.transport === "relay" ? "TURN" : stats.transport === "direct" ? "P2P" : "…"}
+        {videoMode === "webcodecs"
+          ? "HW"
+          : stats.transport === "relay"
+            ? "TURN"
+            : stats.transport === "direct"
+              ? "P2P"
+              : "…"}
       </span>
 
       <div className="toolbar-group">

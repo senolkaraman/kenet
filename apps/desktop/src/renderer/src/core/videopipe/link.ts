@@ -40,8 +40,8 @@ export interface VideoLinkHooks {
   onStats: (s: VideoLinkStats) => void;
 }
 
-type CapsMsg = { t: "vcaps"; caps: LocalVideoCaps };
-type ModeMsg = { t: "vmode"; mode: VideoMode; codec?: string; from?: "host" | "viewer"; why?: string };
+type CapsMsg = { type: "video-caps"; caps: LocalVideoCaps };
+type ModeMsg = { type: "video-mode"; mode: VideoMode; codec?: string; from?: "host" | "viewer"; why?: string };
 
 const START = { bitrate: 8_000_000, framerate: 30 };
 
@@ -73,19 +73,19 @@ export class VideoLink {
     const s = track?.getSettings();
     this.localCaps = await probeLocalCaps(s?.width ?? 1920, s?.height ?? 1080);
     if (this.stopped) return;
-    this.hooks.sendControl({ t: "vcaps", caps: this.localCaps } satisfies CapsMsg);
+    this.hooks.sendControl({ type: "video-caps", caps: this.localCaps } satisfies CapsMsg);
     this.tryNegotiate();
   }
 
   /** Returns true if it consumed the message. */
   onControlMessage(msg: unknown): boolean {
-    const t = (msg as { t?: unknown } | null)?.t;
-    if (t === "vcaps") {
+    const t = (msg as { type?: unknown } | null)?.type;
+    if (t === "video-caps") {
       this.peerCaps = (msg as CapsMsg).caps;
       this.tryNegotiate();
       return true;
     }
-    if (t === "vmode") {
+    if (t === "video-mode") {
       this.applyMode(msg as ModeMsg);
       return true;
     }
@@ -131,7 +131,7 @@ export class VideoLink {
       { hw: this.peerCaps.decodeHw, sw: this.peerCaps.decodeSw }
     );
     if (decision.mode === "webrtc") {
-      this.hooks.sendControl({ t: "vmode", mode: "webrtc", from: "host", why: decision.why } satisfies ModeMsg);
+      this.hooks.sendControl({ type: "video-mode", mode: "webrtc", from: "host", why: decision.why } satisfies ModeMsg);
       this.hooks.onMode("webrtc", decision.why);
       return;
     }
@@ -173,7 +173,7 @@ export class VideoLink {
     }
     void this.hooks.getVideoSender()?.replaceTrack(null).catch(() => {});
     this.mode = "webcodecs";
-    this.hooks.sendControl({ t: "vmode", mode: "webcodecs", codec, from: "host" } satisfies ModeMsg);
+    this.hooks.sendControl({ type: "video-mode", mode: "webcodecs", codec, from: "host" } satisfies ModeMsg);
     this.hooks.onMode("webcodecs");
   }
 
@@ -222,7 +222,7 @@ export class VideoLink {
       onError: () => {
         this.decoderFailures += 1;
         if (this.decoderFailures >= 3) {
-          this.hooks.sendControl({ t: "vmode", mode: "webrtc", from: "viewer", why: "decoder failing" } satisfies ModeMsg);
+          this.hooks.sendControl({ type: "video-mode", mode: "webrtc", from: "viewer", why: "decoder failing" } satisfies ModeMsg);
           this.fallback("decoder failing");
         }
       }
@@ -258,7 +258,7 @@ export class VideoLink {
     if (this.hooks.role === "host") {
       const track = this.hooks.getScreenTrack();
       if (track) void this.hooks.getVideoSender()?.replaceTrack(track).catch(() => {});
-      this.hooks.sendControl({ t: "vmode", mode: "webrtc", from: "host", why: reason } satisfies ModeMsg);
+      this.hooks.sendControl({ type: "video-mode", mode: "webrtc", from: "host", why: reason } satisfies ModeMsg);
     }
     try {
       this.videoChannel?.close();

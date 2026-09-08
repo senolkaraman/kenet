@@ -45,8 +45,10 @@ function ConnectingView() {
 function ViewerView() {
   const remoteStream = useStore(session.store, (s) => s.remoteStream);
   const controlActive = useStore(session.store, (s) => s.controlActive);
+  const videoMode = useStore(session.store, (s) => s.videoMode);
   const autoFullscreen = useStore(settingsStore, (s) => s.autoFullscreen);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const bridgeRef = useRef<InputBridge | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
@@ -57,6 +59,12 @@ function ViewerView() {
   useEffect(() => {
     if (videoRef.current && remoteStream) videoRef.current.srcObject = remoteStream;
   }, [remoteStream]);
+
+  // Hand the canvas to the session so the WebCodecs decoder can paint into it.
+  useEffect(() => {
+    session.setVideoCanvas(canvasRef.current);
+    return () => session.setVideoCanvas(null);
+  }, []);
 
   useEffect(() => {
     if (!surfaceRef.current) return;
@@ -141,8 +149,9 @@ function ViewerView() {
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
       >
-        <video ref={videoRef} autoPlay playsInline draggable={false} />
-        {!remoteStream && (
+        <video ref={videoRef} autoPlay playsInline draggable={false} hidden={videoMode === "webcodecs"} />
+        <canvas ref={canvasRef} className="remote-canvas" hidden={videoMode !== "webcodecs"} />
+        {!remoteStream && videoMode !== "webcodecs" && (
           <div className="surface-empty">
             <span className="spinner" />
             <p>Görüntü bekleniyor…</p>
@@ -180,6 +189,8 @@ function HostView() {
   const privacyActive = useStore(session.store, (s) => s.privacyActive);
   const unattended = useStore(session.store, (s) => s.unattendedSession);
   const stats = useStore(session.store, (s) => s.stats);
+  const videoMode = useStore(session.store, (s) => s.videoMode);
+  const videoStats = useStore(session.store, (s) => s.videoStats);
   const transfers = useStore(session.store, (s) => s.transfers);
   const [screens, setScreens] = useState<Array<{ id: string; label: string; thumbnail: string }>>([]);
   const [sendingClipboardFiles, setSendingClipboardFiles] = useState(false);
@@ -271,10 +282,29 @@ function HostView() {
 
         <div className="card host-side">
           <div className="stat-row"><span>Gecikme</span><strong>{rtt}</strong></div>
-          <div className="stat-row"><span>Gönderim</span><strong>{stats.kbps != null ? `${(stats.kbps / 1000).toFixed(1)} Mbps` : "—"}</strong></div>
-          <div className="stat-row"><span>Kare / çözünürlük</span><strong>{stats.fps != null ? `${stats.fps} fps` : "—"}{stats.width ? ` · ${stats.width}×${stats.height}` : ""}</strong></div>
+          <div className="stat-row"><span>Görüntü yolu</span><strong>{videoMode === "webcodecs" ? `Donanım · ${videoStats?.codec ?? ""}` : "WebRTC (klasik)"}</strong></div>
+          <div className="stat-row">
+            <span>Gönderim</span>
+            <strong>
+              {videoMode === "webcodecs"
+                ? videoStats?.kbps
+                  ? `${(videoStats.kbps / 1000).toFixed(1)} Mbps`
+                  : "—"
+                : stats.kbps != null
+                  ? `${(stats.kbps / 1000).toFixed(1)} Mbps`
+                  : "—"}
+            </strong>
+          </div>
+          <div className="stat-row">
+            <span>Kare / çözünürlük</span>
+            <strong>
+              {videoMode === "webcodecs"
+                ? `${videoStats?.fps ?? 0} fps${videoStats?.width ? ` · ${videoStats.width}×${videoStats.height}` : ""}`
+                : `${stats.fps ?? "—"} fps${stats.width ? ` · ${stats.width}×${stats.height}` : ""}`}
+            </strong>
+          </div>
           <div className="stat-row"><span>Bağlantı</span><strong>{stats.transport === "relay" ? "TURN" : stats.transport === "direct" ? "P2P" : "—"}</strong></div>
-          {stats.limited && (
+          {videoMode !== "webcodecs" && stats.limited && (
             <div className="stat-row"><span>Sınırlayan</span><strong style={{ color: "var(--warn)" }}>
               {stats.limited === "cpu" ? "İşlemci (encode yetişemiyor)" : stats.limited === "bandwidth" ? "Bant genişliği" : stats.limited}
             </strong></div>
