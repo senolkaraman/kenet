@@ -289,6 +289,9 @@ export class VideoLink {
 
   private fallback(reason: string): void {
     if (this.mode === "webrtc") return;
+    // eslint-disable-next-line no-console
+    console.warn("[videopipe] fallback to WebRTC:", reason);
+    this.hooks.onDiag?.(`WebCodecs düştü → WebRTC: ${reason}`);
     this.mode = "webrtc";
     if (this.rateTimer !== undefined) window.clearInterval(this.rateTimer);
     if (this.firstFrameWatchdog !== undefined) window.clearTimeout(this.firstFrameWatchdog);

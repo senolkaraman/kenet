@@ -35,6 +35,7 @@ const MAX_QUEUE = 4; // frames in flight before we start dropping
 export class ScreenEncoder {
   private encoder: VideoEncoder | undefined;
   private reader: ReadableStreamDefaultReader<VideoFrame> | undefined;
+  private captureVideo: HTMLVideoElement | undefined;
   private running = false;
   private readonly keyframes = new KeyframeScheduler(2000);
   private target: RateTarget = { bitrate: 8_000_000, framerate: 30 };
@@ -53,11 +54,7 @@ export class ScreenEncoder {
   constructor(private readonly hooks: ScreenEncoderHooks) {}
 
   async start(track: MediaStreamTrack, choice: CodecChoice, initial: RateTarget): Promise<void> {
-    const Processor = (globalThis as typeof globalThis & { MediaStreamTrackProcessor?: typeof MediaStreamTrackProcessor })
-      .MediaStreamTrackProcessor;
-    if (typeof VideoEncoder === "undefined" || !Processor) {
-      throw new Error("WebCodecs / MediaStreamTrackProcessor unavailable");
-    }
+    if (typeof VideoEncoder === "undefined") throw new Error("WebCodecs VideoEncoder unavailable");
 
     this.choice = choice;
     this.target = { ...initial };
@@ -73,13 +70,51 @@ export class ScreenEncoder {
       }
     });
     this.configureEncoder(true);
-
-    const proc = new Processor({ track });
-    this.reader = (proc.readable as ReadableStream<VideoFrame>).getReader();
     this.running = true;
-    void this.pump();
+
+    const Processor = (globalThis as typeof globalThis & { MediaStreamTrackProcessor?: typeof MediaStreamTrackProcessor })
+      .MediaStreamTrackProcessor;
+    if (Processor) {
+      const proc = new Processor({ track });
+      this.reader = (proc.readable as ReadableStream<VideoFrame>).getReader();
+      void this.pump();
+    } else {
+      // MediaStreamTrackProcessor is behind a flag in some Chromium builds — capture off a
+      // <video> element with requestVideoFrameCallback instead, which needs no flag.
+      await this.startVideoElementCapture(track);
+    }
 
     this.statsTimer = window.setInterval(() => this.emitStats(), 1000);
+  }
+
+  private async startVideoElementCapture(track: MediaStreamTrack): Promise<void> {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = new MediaStream([track]);
+    this.captureVideo = video;
+    await video.play().catch(() => {});
+    const rvfc = (
+      video as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number }
+    ).requestVideoFrameCallback?.bind(video);
+    const tick = () => {
+      if (!this.running || !this.captureVideo) return;
+      if (video.readyState >= 2 && video.videoWidth) {
+        let frame: VideoFrame | undefined;
+        try {
+          frame = new VideoFrame(video, { timestamp: performance.now() * 1000 });
+          this.consume(frame);
+        } catch {
+          /* transient */
+        } finally {
+          frame?.close();
+        }
+      }
+      if (rvfc) rvfc(tick);
+      else window.setTimeout(tick, 1000 / 60);
+    };
+    if (rvfc) rvfc(tick);
+    else window.setTimeout(tick, 1000 / 60);
   }
 
   requestKeyframe(): void {
@@ -100,6 +135,10 @@ export class ScreenEncoder {
     this.statsTimer = undefined;
     void this.reader?.cancel().catch(() => {});
     this.reader = undefined;
+    if (this.captureVideo) {
+      this.captureVideo.srcObject = null;
+      this.captureVideo = undefined;
+    }
     try {
       if (this.encoder && this.encoder.state !== "closed") this.encoder.close();
     } catch {

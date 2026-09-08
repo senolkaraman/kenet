@@ -254,6 +254,9 @@ app.commandLine.appendSwitch(
 );
 app.commandLine.appendSwitch("enable-gpu-rasterization");
 app.commandLine.appendSwitch("enable-zero-copy");
+// MediaStreamTrackProcessor (the clean way to feed frames to a VideoEncoder) is flag-gated in
+// some Chromium builds — turn it on; the encoder has a <video>+rVFC fallback if it's still absent.
+app.commandLine.appendSwitch("enable-blink-features", "MediaStreamInsertableStreams");
 // The host is routinely minimised / covered while it shares its screen. Chromium's default is to
 // throttle — or entirely suspend the capture of — an occluded window, which freezes the stream
 // the instant the user clicks "minimise". Disable every layer of that.
