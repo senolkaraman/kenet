@@ -151,7 +151,11 @@ function ViewerView() {
       >
         {/* video stays mounted (and audible) even on the WebCodecs path — the canvas just covers it */}
         <video ref={videoRef} autoPlay playsInline draggable={false} />
-        <canvas ref={canvasRef} className="remote-canvas" hidden={videoMode !== "webcodecs"} />
+        <canvas
+          ref={canvasRef}
+          className="remote-canvas"
+          style={{ display: videoMode === "webcodecs" ? "block" : "none" }}
+        />
         {!remoteStream && videoMode !== "webcodecs" && (
           <div className="surface-empty">
             <span className="spinner" />

@@ -76,32 +76,37 @@ export const probeLocalVideoCodec: ProbeFn = async (choice, width, height) => {
     return { encode: false, decode: false, hardware: false };
   }
 
-  const encCfg: VideoEncoderConfig = {
+  const encBase: VideoEncoderConfig = {
     codec: choice.codec,
     width,
     height,
     bitrate: 8_000_000,
     framerate: 30,
     latencyMode: "realtime",
-    hardwareAcceleration: "prefer-hardware",
     ...(choice.avcFormat === "avc" ? { avc: { format: "avc" } } : {})
   };
-  const decCfg: VideoDecoderConfig = {
+  const decBase: VideoDecoderConfig = {
     codec: choice.codec,
     codedWidth: width,
     codedHeight: height,
-    hardwareAcceleration: "prefer-hardware",
     optimizeForLatency: true
   };
 
-  const enc = await VE.isConfigSupported(encCfg);
-  const dec = await VD.isConfigSupported(decCfg);
+  // "prefer-hardware" always reports supported when a software fallback exists — it tells us
+  // nothing about actual acceleration. "require-hardware" is the real test (valid per spec, not
+  // yet in lib.dom's HardwareAcceleration union).
+  const REQUIRE_HW = "require-hardware" as HardwareAcceleration;
+  const [encAny, encHw, decAny, decHw] = await Promise.all([
+    VE.isConfigSupported({ ...encBase, hardwareAcceleration: "no-preference" }),
+    VE.isConfigSupported({ ...encBase, hardwareAcceleration: REQUIRE_HW }),
+    VD.isConfigSupported({ ...decBase, hardwareAcceleration: "no-preference" }),
+    VD.isConfigSupported({ ...decBase, hardwareAcceleration: REQUIRE_HW })
+  ]);
 
-  const hardware = Boolean(enc.supported) && enc.config?.hardwareAcceleration !== "prefer-software";
   return {
-    encode: Boolean(enc.supported),
-    decode: Boolean(dec.supported),
-    hardware
+    encode: Boolean(encAny.supported),
+    decode: Boolean(decAny.supported),
+    hardware: Boolean(encHw.supported) && Boolean(decHw.supported)
   };
 };
 

@@ -64,6 +64,8 @@ export class VideoLink {
   private stopped = false;
   private decoderFailures = 0;
   private negotiatedCodec = "";
+  private firstFrameWatchdog: number | undefined;
+  private sawFrame = false;
 
   constructor(private readonly hooks: VideoLinkHooks) {}
 
@@ -73,6 +75,8 @@ export class VideoLink {
     const s = track?.getSettings();
     this.localCaps = await probeLocalCaps(s?.width ?? 1920, s?.height ?? 1080);
     if (this.stopped) return;
+    // eslint-disable-next-line no-console
+    console.info(`[videopipe] ${this.hooks.role} caps`, this.localCaps);
     this.hooks.sendControl({ type: "video-caps", caps: this.localCaps } satisfies CapsMsg);
     this.tryNegotiate();
   }
@@ -112,6 +116,7 @@ export class VideoLink {
   stop(): void {
     this.stopped = true;
     if (this.rateTimer !== undefined) window.clearInterval(this.rateTimer);
+    if (this.firstFrameWatchdog !== undefined) window.clearTimeout(this.firstFrameWatchdog);
     this.encoder?.stop();
     this.decoder?.stop();
     try {
@@ -130,6 +135,8 @@ export class VideoLink {
       { hw: this.localCaps.encodeHw, sw: this.localCaps.encodeSw },
       { hw: this.peerCaps.decodeHw, sw: this.peerCaps.decodeSw }
     );
+    // eslint-disable-next-line no-console
+    console.info("[videopipe] decision", decision, { hostEncodeHw: this.localCaps.encodeHw, viewerDecodeHw: this.peerCaps.decodeHw });
     if (decision.mode === "webrtc") {
       this.hooks.sendControl({ type: "video-mode", mode: "webrtc", from: "host", why: decision.why } satisfies ModeMsg);
       this.hooks.onMode("webrtc", decision.why);
@@ -218,7 +225,11 @@ export class VideoLink {
         this.decStats = st;
         this.pushStats();
       },
-      onFirstFrame: () => this.hooks.onMode("webcodecs"),
+      onFirstFrame: () => {
+        this.sawFrame = true;
+        if (this.firstFrameWatchdog !== undefined) window.clearTimeout(this.firstFrameWatchdog);
+        this.hooks.onMode("webcodecs");
+      },
       onError: () => {
         this.decoderFailures += 1;
         if (this.decoderFailures >= 3) {
@@ -232,7 +243,16 @@ export class VideoLink {
       this.decoder.start();
     } catch {
       this.fallback("no WebCodecs decoder");
+      return;
     }
+    // Fail safe: if nothing is on the canvas within 4 s, the WebCodecs path is broken somewhere
+    // the error callbacks didn't catch — drop back to WebRTC rather than sit on a black screen.
+    this.firstFrameWatchdog = window.setTimeout(() => {
+      if (!this.sawFrame) {
+        this.hooks.sendControl({ type: "video-mode", mode: "webrtc", from: "viewer", why: "no frames" } satisfies ModeMsg);
+        this.fallback("no frames in 4s");
+      }
+    }, 4000);
   }
 
   private onVideoData(data: ArrayBuffer): void {
@@ -252,6 +272,7 @@ export class VideoLink {
     if (this.mode === "webrtc") return;
     this.mode = "webrtc";
     if (this.rateTimer !== undefined) window.clearInterval(this.rateTimer);
+    if (this.firstFrameWatchdog !== undefined) window.clearTimeout(this.firstFrameWatchdog);
     this.encoder?.stop();
     this.decoder?.stop();
     this.encoder = this.decoder = undefined;
