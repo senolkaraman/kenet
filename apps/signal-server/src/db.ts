@@ -10,9 +10,20 @@ export const setPool = (pool: Pool): void => {
 
 export const pool = (): Pool => {
   if (!activePool) {
-    activePool = new Pool(
-      env.databaseUrl ? { connectionString: env.databaseUrl, max: 8 } : { max: 8 }
-    );
+    if (!env.databaseUrl) {
+      activePool = new Pool({ max: 8 });
+    } else {
+      // Managed Postgres (Neon, Supabase, …) needs TLS but ships a CA chain Node doesn't bundle;
+      // a local socket / Cloud SQL unix socket / localhost does not. Detect and only force TLS
+      // (without strict CA verification) for the remote-host case.
+      const url = env.databaseUrl;
+      const remote = !url.includes("/cloudsql/") && !/@(localhost|127\.0\.0\.1|\[::1\])/.test(url);
+      activePool = new Pool({
+        connectionString: url,
+        max: 8,
+        ...(remote ? { ssl: { rejectUnauthorized: false } } : {})
+      });
+    }
   }
   return activePool;
 };
