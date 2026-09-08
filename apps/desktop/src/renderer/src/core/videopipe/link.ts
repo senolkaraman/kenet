@@ -210,7 +210,11 @@ export class VideoLink {
     this.encoder = new ScreenEncoder({
       onConfig: (cfg) => this.videoChannel?.send(packConfig(cfg)),
       onChunk: (f) => {
-        if (this.videoChannel && this.videoChannel.bufferedAmount < 8 * 1024 * 1024) {
+        // Never drop an encoded chunk — the channel is reliable+ordered, so dropping one delta
+        // desyncs the decoder into the coloured-band garbage. If the backlog is huge, drop the
+        // encoder's *rate* instead (RateController tick) and, as a last resort, only skip deltas.
+        if (!this.videoChannel) return;
+        if (f.key || this.videoChannel.bufferedAmount < 24 * 1024 * 1024) {
           this.videoChannel.send(packChunk(f));
         }
       },

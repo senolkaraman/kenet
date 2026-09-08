@@ -25,7 +25,7 @@ interface RateTarget {
   framerate: number;
 }
 
-const MAX_QUEUE = 4; // frames in flight before we start dropping
+const MAX_QUEUE = 8; // frames in flight before we start dropping (software encode bursts)
 
 /** Encoders want even, not-tiny dimensions; a 3px window mid-resize otherwise crashes them. */
 export const clampDim = (n: number): number => {
@@ -42,6 +42,7 @@ export class ScreenEncoder {
   private encoder: VideoEncoder | undefined;
   private reader: ReadableStreamDefaultReader<VideoFrame> | undefined;
   private captureVideo: HTMLVideoElement | undefined;
+  private captureTimer: number | undefined;
   private running = false;
   private readonly keyframes = new KeyframeScheduler(2000);
   private target: RateTarget = { bitrate: 8_000_000, framerate: 30 };
@@ -109,27 +110,22 @@ export class ScreenEncoder {
     video.srcObject = new MediaStream([track]);
     this.captureVideo = video;
     await video.play().catch(() => {});
-    const rvfc = (
-      video as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number }
-    ).requestVideoFrameCallback?.bind(video);
-    const tick = () => {
+    // Deliberately NOT requestVideoFrameCallback: it stops firing when the host window is
+    // minimised/occluded, which freezes the whole stream. A plain timer keeps running (the app
+    // sets disable-background-timer-throttling), and screen content tolerates a fixed cadence.
+    this.captureTimer = window.setInterval(() => {
       if (!this.running || !this.captureVideo) return;
-      if (video.readyState >= 2 && video.videoWidth) {
-        let frame: VideoFrame | undefined;
-        try {
-          frame = new VideoFrame(video, { timestamp: performance.now() * 1000 });
-          this.consume(frame);
-        } catch {
-          /* transient */
-        } finally {
-          frame?.close();
-        }
+      if (video.readyState < 2 || !video.videoWidth) return;
+      let frame: VideoFrame | undefined;
+      try {
+        frame = new VideoFrame(video, { timestamp: performance.now() * 1000 });
+        this.consume(frame);
+      } catch {
+        /* transient — between play() and first decoded frame */
+      } finally {
+        frame?.close();
       }
-      if (rvfc) rvfc(tick);
-      else window.setTimeout(tick, 1000 / 60);
-    };
-    if (rvfc) rvfc(tick);
-    else window.setTimeout(tick, 1000 / 60);
+    }, 1000 / 30);
   }
 
   requestKeyframe(): void {
@@ -156,6 +152,8 @@ export class ScreenEncoder {
     this.statsTimer = undefined;
     if (this.resizeDebounce !== undefined) window.clearTimeout(this.resizeDebounce);
     this.resizeDebounce = undefined;
+    if (this.captureTimer !== undefined) window.clearInterval(this.captureTimer);
+    this.captureTimer = undefined;
     void this.reader?.cancel().catch(() => {});
     this.reader = undefined;
     if (this.captureVideo) {

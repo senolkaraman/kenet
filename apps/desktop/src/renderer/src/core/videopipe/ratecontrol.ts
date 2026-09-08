@@ -25,16 +25,18 @@ export interface RateDecision extends RateState {
 }
 
 const DEFAULT_BOUNDS: RateBounds = {
-  minBitrate: 400_000,
+  // Below ~1.2 Mbps H.264 at 768p is unwatchable blocky mush — a low, choppy-but-legible floor
+  // beats letting the controller chase a collapsing estimate down to nothing.
+  minBitrate: 1_200_000,
   maxBitrate: 12_000_000,
-  minFramerate: 15,
+  minFramerate: 12,
   maxFramerate: 30
 };
 
-// bufferedAmount thresholds, in bytes. A single 1080p keyframe can be ~150 KB, so "high" has to
-// sit above one frame's worth or every keyframe would trip it.
-const HIGH_WATER = 512 * 1024;
-const LOW_WATER = 48 * 1024;
+// bufferedAmount thresholds, in bytes. Software encoders emit in bursts (keyframe + a few
+// deltas), so "high" sits well above a couple of frames to avoid twitchy back-off.
+const HIGH_WATER = 3 * 1024 * 1024;
+const LOW_WATER = 256 * 1024;
 // consecutive low-water ticks before we try to climb
 const RECOVER_TICKS = 3;
 
@@ -44,11 +46,15 @@ export class RateController {
   private framerate: number;
   private lowStreak = 0;
   private lastBuffered = 0;
+  private ticks = 0;
+  // SCTP congestion control ramps over the first few seconds — don't read early backlog as trouble.
+  private readonly graceTicks: number;
 
-  constructor(start: RateState, bounds: Partial<RateBounds> = {}) {
+  constructor(start: RateState, bounds: Partial<RateBounds> = {}, graceTicks = 4) {
     this.bounds = { ...DEFAULT_BOUNDS, ...bounds };
     this.bitrate = clamp(start.bitrate, this.bounds.minBitrate, this.bounds.maxBitrate);
     this.framerate = clamp(start.framerate, this.bounds.minFramerate, this.bounds.maxFramerate);
+    this.graceTicks = graceTicks;
   }
 
   get state(): RateState {
@@ -57,9 +63,14 @@ export class RateController {
 
   /** Call ~once per second with the current data-channel backlog. */
   tick(bufferedAmount: number): RateDecision {
+    this.ticks += 1;
     const before = { bitrate: this.bitrate, framerate: this.framerate };
     const rising = bufferedAmount > this.lastBuffered + LOW_WATER;
     this.lastBuffered = bufferedAmount;
+
+    if (this.ticks <= this.graceTicks) {
+      return { bitrate: this.bitrate, framerate: this.framerate, changed: false, reason: "steady" };
+    }
 
     let reason: RateDecision["reason"] = "steady";
 
