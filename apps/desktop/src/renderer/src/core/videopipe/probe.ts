@@ -92,22 +92,25 @@ export const probeLocalVideoCodec: ProbeFn = async (choice, width, height) => {
     optimizeForLatency: true
   };
 
-  // "prefer-hardware" always reports supported when a software fallback exists — it tells us
-  // nothing about actual acceleration. "require-hardware" is the real test (valid per spec, not
-  // yet in lib.dom's HardwareAcceleration union).
+  // Older Chromium builds reject the "require-hardware" enum outright (throw, not
+  // { supported:false }), so probe each thing independently — one rejection must never take the
+  // rest of the answer down with it. "no-preference" is always a valid enum.
+  const ok = async (p: Promise<{ supported?: boolean }>): Promise<boolean> => {
+    try {
+      return Boolean((await p).supported);
+    } catch {
+      return false;
+    }
+  };
   const REQUIRE_HW = "require-hardware" as HardwareAcceleration;
   const [encAny, encHw, decAny, decHw] = await Promise.all([
-    VE.isConfigSupported({ ...encBase, hardwareAcceleration: "no-preference" }),
-    VE.isConfigSupported({ ...encBase, hardwareAcceleration: REQUIRE_HW }),
-    VD.isConfigSupported({ ...decBase, hardwareAcceleration: "no-preference" }),
-    VD.isConfigSupported({ ...decBase, hardwareAcceleration: REQUIRE_HW })
+    ok(VE.isConfigSupported({ ...encBase, hardwareAcceleration: "no-preference" })),
+    ok(VE.isConfigSupported({ ...encBase, hardwareAcceleration: REQUIRE_HW })),
+    ok(VD.isConfigSupported({ ...decBase, hardwareAcceleration: "no-preference" })),
+    ok(VD.isConfigSupported({ ...decBase, hardwareAcceleration: REQUIRE_HW }))
   ]);
 
-  return {
-    encode: Boolean(encAny.supported),
-    decode: Boolean(decAny.supported),
-    hardware: Boolean(encHw.supported) && Boolean(decHw.supported)
-  };
+  return { encode: encAny, decode: decAny, hardware: encHw && decHw };
 };
 
 export interface LocalVideoCaps {
@@ -143,6 +146,14 @@ export const probeLocalCaps = async (
       if (s.hardware) caps.decodeHw.push(choice.codec);
     }
   }
+  // Safety net: libvpx VP8 software encode+decode ships in every Chromium build. If the probe
+  // reported nothing (a broken isConfigSupported, an unrecognised enum, …) but the WebCodecs
+  // constructors exist, VP8 is still there — don't let a probe quirk block the whole path.
+  const haveApi =
+    typeof (globalThis as { VideoEncoder?: unknown }).VideoEncoder === "function" &&
+    typeof (globalThis as { VideoDecoder?: unknown }).VideoDecoder === "function";
+  if (haveApi && caps.encodeSw.length === 0) caps.encodeSw.push("vp8");
+  if (haveApi && caps.decodeSw.length === 0) caps.decodeSw.push("vp8");
   return caps;
 };
 

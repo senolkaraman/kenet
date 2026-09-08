@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { selectVideoCodec, CODEC_CANDIDATES, type ProbeFn, type CodecSupport } from "./probe";
+import { describe, expect, it, vi, afterEach } from "vitest";
+import { selectVideoCodec, probeLocalCaps, CODEC_CANDIDATES, type ProbeFn, type CodecSupport } from "./probe";
 
 const support = (p: Partial<CodecSupport>): CodecSupport => ({ encode: false, decode: false, hardware: false, ...p });
 
@@ -54,5 +54,43 @@ describe("selectVideoCodec", () => {
     const r = await selectVideoCodec(probe, 800, 600);
     expect(r).toBeNull();
     expect(probe).toHaveBeenCalledTimes(CODEC_CANDIDATES.length);
+  });
+});
+
+describe("probeLocalCaps", () => {
+  afterEach(() => {
+    delete (globalThis as { VideoEncoder?: unknown }).VideoEncoder;
+    delete (globalThis as { VideoDecoder?: unknown }).VideoDecoder;
+  });
+
+  it("buckets hw/sw from the per-codec probe", async () => {
+    const probe: ProbeFn = async (c) =>
+      c.codec === "avc1.42E01F"
+        ? support({ encode: true, decode: true, hardware: true })
+        : c.codec === "vp8"
+          ? support({ encode: true, decode: true, hardware: false })
+          : support({});
+    const caps = await probeLocalCaps(1366, 768, probe);
+    expect(caps.encodeHw).toEqual(["avc1.42E01F"]);
+    expect(caps.encodeSw).toEqual(["avc1.42E01F", "vp8"]);
+  });
+
+  it("falls back to VP8 when the probe reports nothing but the API exists", async () => {
+    (globalThis as { VideoEncoder?: unknown }).VideoEncoder = function () {};
+    (globalThis as { VideoDecoder?: unknown }).VideoDecoder = function () {};
+    const brokenProbe: ProbeFn = async () => {
+      throw new Error("isConfigSupported blew up");
+    };
+    const caps = await probeLocalCaps(1366, 768, brokenProbe);
+    expect(caps.encodeSw).toContain("vp8");
+    expect(caps.decodeSw).toContain("vp8");
+  });
+
+  it("does NOT fabricate VP8 when there is no WebCodecs API", async () => {
+    const brokenProbe: ProbeFn = async () => {
+      throw new Error("no api");
+    };
+    const caps = await probeLocalCaps(1366, 768, brokenProbe);
+    expect(caps.encodeSw).toEqual([]);
   });
 });
