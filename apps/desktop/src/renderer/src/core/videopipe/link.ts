@@ -39,6 +39,8 @@ export interface VideoLinkHooks {
   getCanvas: () => HTMLCanvasElement | null;
   onMode: (mode: VideoMode, reason?: string) => void;
   onStats: (s: VideoLinkStats) => void;
+  /** one-line human diagnostic for the Durum panel */
+  onDiag?: (line: string) => void;
 }
 
 type CapsMsg = { type: "video-caps"; caps: LocalVideoCaps };
@@ -79,6 +81,12 @@ export class VideoLink {
     if (this.stopped) return;
     // eslint-disable-next-line no-console
     console.info(`[videopipe] ${this.hooks.role} caps`, this.localCaps);
+    const encList = this.localCaps.encodeHw.length
+      ? `HW ${this.localCaps.encodeHw.join(",")}`
+      : this.localCaps.encodeSw.length
+        ? `SW ${this.localCaps.encodeSw.join(",")}`
+        : "yok";
+    this.hooks.onDiag?.(`bu makine encode: ${encList}`);
     this.hooks.sendControl({ type: "video-caps", caps: this.localCaps } satisfies CapsMsg);
     this.tryNegotiate();
   }
@@ -143,10 +151,14 @@ export class VideoLink {
     // eslint-disable-next-line no-console
     console.info("[videopipe] decision", decision, { hostEncodeHw: this.localCaps.encodeHw, hostEncodeSw: this.localCaps.encodeSw, viewerDecodeHw: this.peerCaps.decodeHw, viewerDecodeSw: this.peerCaps.decodeSw });
     if (decision.mode === "webrtc") {
+      this.hooks.onDiag?.(
+        `karar: WebRTC — ${decision.why} · host enc [${this.localCaps.encodeSw.join(",") || "-"}] · viewer dec [${this.peerCaps.decodeSw.join(",") || "-"}]`
+      );
       this.hooks.sendControl({ type: "video-mode", mode: "webrtc", from: "host", why: decision.why } satisfies ModeMsg);
       this.hooks.onMode("webrtc", decision.why);
       return;
     }
+    this.hooks.onDiag?.(`karar: WebCodecs ${decision.hardware ? "donanım" : "yazılım"} ${decision.codec}`);
     this.hardware = decision.hardware;
     this.rate = new RateController(decision.hardware ? { bitrate: 8_000_000, framerate: 30 } : { bitrate: 5_000_000, framerate: 24 });
     this.enterWebCodecsHost(decision.codec);

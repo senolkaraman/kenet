@@ -109,6 +109,13 @@ export class StatsProbe {
           ? rtp.qualityLimitationReason
           : null;
       }
+      // Sender side: the receiver's RTCP feedback — this is how the host learns the viewer is
+      // dropping its packets (which is what makes GCC crater the bitrate).
+      if (entry.type === "remote-inbound-rtp" && (entry as { kind?: string }).kind === "video") {
+        const r = entry as { fractionLost?: number; roundTripTime?: number };
+        if (r.fractionLost != null) next.packetLoss = Math.round(r.fractionLost * 1000) / 10;
+        if (r.roundTripTime != null && next.rttMs == null) next.rttMs = Math.round(r.roundTripTime * 1000);
+      }
       if (entry.type === "candidate-pair") candidatePairs.set(entry.id, entry as RTCIceCandidatePairStats);
       if (entry.type === "local-candidate" || entry.type === "remote-candidate") {
         candidates.set(entry.id, entry as { candidateType?: string });

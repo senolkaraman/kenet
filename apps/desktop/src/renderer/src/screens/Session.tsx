@@ -196,6 +196,7 @@ function HostView() {
   const stats = useStore(session.store, (s) => s.stats);
   const videoMode = useStore(session.store, (s) => s.videoMode);
   const videoStats = useStore(session.store, (s) => s.videoStats);
+  const videoDiag = useStore(session.store, (s) => s.videoDiag);
   const transfers = useStore(session.store, (s) => s.transfers);
   const [screens, setScreens] = useState<Array<{ id: string; label: string; thumbnail: string }>>([]);
   const [sendingClipboardFiles, setSendingClipboardFiles] = useState(false);
@@ -309,10 +310,19 @@ function HostView() {
             </strong>
           </div>
           <div className="stat-row"><span>Bağlantı</span><strong>{stats.transport === "relay" ? "TURN" : stats.transport === "direct" ? "P2P" : "—"}</strong></div>
+          {stats.packetLoss != null && stats.packetLoss > 0 && (
+            <div className="stat-row"><span>Paket kaybı</span><strong style={{ color: stats.packetLoss > 2 ? "var(--danger)" : "var(--warn)" }}>%{stats.packetLoss}</strong></div>
+          )}
           {videoMode !== "webcodecs" && stats.limited && (
             <div className="stat-row"><span>Sınırlayan</span><strong style={{ color: "var(--warn)" }}>
               {stats.limited === "cpu" ? "İşlemci (encode yetişemiyor)" : stats.limited === "bandwidth" ? "Bant genişliği" : stats.limited}
             </strong></div>
+          )}
+          {videoDiag && (
+            <div className="stat-row" style={{ alignItems: "flex-start" }}>
+              <span>Video tanı</span>
+              <strong style={{ fontSize: 11, fontWeight: 500, color: "var(--text-3)", textAlign: "right", maxWidth: "62%" }}>{videoDiag}</strong>
+            </div>
           )}
           {screens.length > 0 && (
             <>

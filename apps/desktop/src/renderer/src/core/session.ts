@@ -54,6 +54,8 @@ export interface SessionState {
   /** "webcodecs" once the GPU-encoded path takes over; "webrtc" is the always-available baseline. */
   videoMode: VideoMode;
   videoStats: VideoLinkStats | null;
+  /** one-line human explanation of the video-path decision, for the Durum panel */
+  videoDiag: string | null;
   controlOffered: boolean;
   controlActive: boolean;
   privacyActive: boolean;
@@ -90,6 +92,7 @@ const initialState: SessionState = {
   remoteStream: null,
   videoMode: "webrtc",
   videoStats: null,
+  videoDiag: null,
   controlOffered: false,
   controlActive: false,
   privacyActive: false,
@@ -600,7 +603,10 @@ export class SessionController {
     };
     const spinUpVideoLink = () => {
       if (this.videoLink || this.pc === undefined || this.get().role === "idle") return;
-      if (typeof VideoEncoder === "undefined" && typeof VideoDecoder === "undefined") return;
+      if (typeof VideoEncoder === "undefined" || typeof VideoDecoder === "undefined") {
+        this.set({ videoDiag: "WebCodecs API bu sürümde yok" });
+        return;
+      }
       const link = new VideoLink({
         role: this.get().role === "host" ? "host" : "viewer",
         pc: this.pc,
@@ -612,6 +618,7 @@ export class SessionController {
           this.set({ videoMode: mode });
           if (reason) this.set({ message: mode === "webcodecs" ? "Donanım hızlandırmalı görüntü etkin." : `Görüntü klasik moda döndü (${reason}).` });
         },
+        onDiag: (line) => this.set({ videoDiag: line }),
         onStats: (s) => this.set({ videoStats: s })
       });
       this.videoLink = link;
@@ -1300,6 +1307,7 @@ export class SessionController {
       remoteStream: null,
       videoMode: "webrtc",
       videoStats: null,
+      videoDiag: null,
       controlOffered: false,
       controlActive: false,
       privacyActive: false,
