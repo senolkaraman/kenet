@@ -149,7 +149,8 @@ function ViewerView() {
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
       >
-        <video ref={videoRef} autoPlay playsInline draggable={false} hidden={videoMode === "webcodecs"} />
+        {/* video stays mounted (and audible) even on the WebCodecs path — the canvas just covers it */}
+        <video ref={videoRef} autoPlay playsInline draggable={false} />
         <canvas ref={canvasRef} className="remote-canvas" hidden={videoMode !== "webcodecs"} />
         {!remoteStream && videoMode !== "webcodecs" && (
           <div className="surface-empty">
