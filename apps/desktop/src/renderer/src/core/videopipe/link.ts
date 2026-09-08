@@ -220,7 +220,7 @@ export class VideoLink {
       },
       onError: (err) => this.fallback(`encoder: ${err.message}`)
     });
-    this.encoder.start(track, choice, this.rate.state).catch((err: unknown) => {
+    this.encoder.start(track, choice, this.rate.state, { hardware: this.hardware }).catch((err: unknown) => {
       this.fallback(`encoder start: ${err instanceof Error ? err.message : String(err)}`);
     });
     this.rateTimer = window.setInterval(() => {

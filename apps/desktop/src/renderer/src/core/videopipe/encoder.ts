@@ -27,6 +27,12 @@ interface RateTarget {
 
 const MAX_QUEUE = 4; // frames in flight before we start dropping
 
+/** Encoders want even, not-tiny dimensions; a 3px window mid-resize otherwise crashes them. */
+export const clampDim = (n: number): number => {
+  const v = Math.max(64, Math.round(n || 0));
+  return v - (v % 2);
+};
+
 /**
  * Host side of the WebCodecs video path: pulls VideoFrames off the shared-screen track, encodes
  * them with a (preferably GPU) VideoEncoder, and hands each EncodedVideoChunk to `onChunk` for the
@@ -42,8 +48,11 @@ export class ScreenEncoder {
   private choice: CodecChoice | undefined;
   private width = 0;
   private height = 0;
+  private preferHardware = false;
   private lastEncodeMs = 0;
+  private lastConfigMs = 0;
   private lastConfigJson = "";
+  private resizeDebounce: number | undefined;
   private statsTimer: number | undefined;
 
   // rolling stats
@@ -53,14 +62,20 @@ export class ScreenEncoder {
 
   constructor(private readonly hooks: ScreenEncoderHooks) {}
 
-  async start(track: MediaStreamTrack, choice: CodecChoice, initial: RateTarget): Promise<void> {
+  async start(
+    track: MediaStreamTrack,
+    choice: CodecChoice,
+    initial: RateTarget,
+    opts: { hardware?: boolean } = {}
+  ): Promise<void> {
     if (typeof VideoEncoder === "undefined") throw new Error("WebCodecs VideoEncoder unavailable");
 
     this.choice = choice;
     this.target = { ...initial };
+    this.preferHardware = opts.hardware ?? false;
     const s = track.getSettings();
-    this.width = s.width ?? 1280;
-    this.height = s.height ?? 720;
+    this.width = clampDim(s.width ?? 1280);
+    this.height = clampDim(s.height ?? 720);
 
     this.encoder = new VideoEncoder({
       output: (chunk, meta) => this.onEncoded(chunk, meta),
@@ -122,17 +137,25 @@ export class ScreenEncoder {
   }
 
   setRate(bitrate: number, framerate: number): void {
-    const bChange = Math.abs(bitrate - this.target.bitrate) / this.target.bitrate > 0.08;
-    const fChange = framerate !== this.target.framerate;
-    this.target = { bitrate, framerate };
-    if (bChange) this.configureEncoder(false); // framerate is enforced in pump(), not via reconfigure
-    void fChange;
+    // Reconfigure is expensive and, done too often, crashes hardware encoders — only when the
+    // bitrate really moved and not more than once every 4s.
+    const bChange = Math.abs(bitrate - this.target.bitrate) / Math.max(1, this.target.bitrate) > 0.25;
+    this.target = { bitrate, framerate }; // framerate is enforced in consume(), no reconfigure
+    if (bChange && performance.now() - this.lastConfigMs > 4000) {
+      try {
+        this.configureEncoder(false);
+      } catch {
+        /* keep the last good config */
+      }
+    }
   }
 
   stop(): void {
     this.running = false;
     if (this.statsTimer !== undefined) window.clearInterval(this.statsTimer);
     this.statsTimer = undefined;
+    if (this.resizeDebounce !== undefined) window.clearTimeout(this.resizeDebounce);
+    this.resizeDebounce = undefined;
     void this.reader?.cancel().catch(() => {});
     this.reader = undefined;
     if (this.captureVideo) {
@@ -149,16 +172,18 @@ export class ScreenEncoder {
 
   private configureEncoder(first: boolean): void {
     if (!this.encoder || !this.choice) return;
-    // Even-dimension guard: several encoders reject odd width/height outright.
-    const w = this.width - (this.width % 2);
-    const h = this.height - (this.height % 2);
+    this.lastConfigMs = performance.now();
+    const w = clampDim(this.width);
+    const h = clampDim(this.height);
     const base = {
       width: w,
       height: h,
       bitrate: this.target.bitrate,
       framerate: this.target.framerate,
       latencyMode: "realtime" as const,
-      hardwareAcceleration: "prefer-hardware" as const
+      // "prefer-hardware" on a machine whose GPU can't encode this codec throws "Encoder creation
+      // error" instead of falling back — only ask for hardware when we negotiated it.
+      hardwareAcceleration: (this.preferHardware ? "prefer-hardware" : "no-preference") as HardwareAcceleration
     };
     const withAvc = this.choice.avcFormat === "avc" ? { avc: { format: "avc" as const } } : {};
     // Try the precise codec string, then the bare family name (lets Chromium pick a level).
@@ -208,16 +233,33 @@ export class ScreenEncoder {
       return; // encoder is behind — skip rather than pile up latency
     }
 
-    // Resolution can change (monitor switch, DPI) — track it so the decoder side stays in sync.
+    // Resolution can change (monitor switch, DPI). Encode this frame at whatever size it is, but
+    // only *reconfigure* the encoder once the size has held steady for 400ms — reconfiguring on
+    // every frame during a window resize is exactly what triggers "Encoder creation error".
     if (frame.displayWidth && (frame.displayWidth !== this.width || frame.displayHeight !== this.height)) {
-      this.width = frame.displayWidth;
-      this.height = frame.displayHeight;
-      this.configureEncoder(false);
+      const nw = clampDim(frame.displayWidth);
+      const nh = clampDim(frame.displayHeight);
+      if (this.resizeDebounce !== undefined) window.clearTimeout(this.resizeDebounce);
+      this.resizeDebounce = window.setTimeout(() => {
+        this.resizeDebounce = undefined;
+        if (nw === this.width && nh === this.height) return;
+        this.width = nw;
+        this.height = nh;
+        try {
+          this.configureEncoder(false);
+        } catch (e) {
+          this.hooks.onError?.(e instanceof Error ? e : new Error(String(e)));
+        }
+      }, 400);
     }
 
-    const key = this.keyframes.due(now);
-    this.encoder.encode(frame, { keyFrame: key });
-    this.lastEncodeMs = now;
+    try {
+      const key = this.keyframes.due(now);
+      this.encoder.encode(frame, { keyFrame: key });
+      this.lastEncodeMs = now;
+    } catch {
+      /* encoder not ready between (re)configures — skip this frame */
+    }
   }
 
   private onEncoded(chunk: EncodedVideoChunk, meta: EncodedVideoChunkMetadata | undefined): void {
