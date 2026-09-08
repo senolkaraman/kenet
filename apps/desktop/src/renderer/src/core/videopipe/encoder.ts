@@ -149,17 +149,32 @@ export class ScreenEncoder {
 
   private configureEncoder(first: boolean): void {
     if (!this.encoder || !this.choice) return;
-    const cfg: VideoEncoderConfig = {
-      codec: this.choice.codec,
-      width: this.width,
-      height: this.height,
+    // Even-dimension guard: several encoders reject odd width/height outright.
+    const w = this.width - (this.width % 2);
+    const h = this.height - (this.height % 2);
+    const base = {
+      width: w,
+      height: h,
       bitrate: this.target.bitrate,
       framerate: this.target.framerate,
-      latencyMode: "realtime",
-      hardwareAcceleration: "prefer-hardware",
-      ...(this.choice.avcFormat === "avc" ? { avc: { format: "avc" } } : {})
+      latencyMode: "realtime" as const,
+      hardwareAcceleration: "prefer-hardware" as const
     };
-    this.encoder.configure(cfg);
+    const withAvc = this.choice.avcFormat === "avc" ? { avc: { format: "avc" as const } } : {};
+    // Try the precise codec string, then the bare family name (lets Chromium pick a level).
+    const bare = /^avc1/.test(this.choice.codec) ? "avc1.42E028" : /^vp09/.test(this.choice.codec) ? "vp8" : this.choice.codec;
+    try {
+      this.encoder.configure({ codec: this.choice.codec, ...base, ...withAvc });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(`[videopipe] encoder.configure(${this.choice.codec}) failed, retrying as ${bare}:`, e);
+      this.choice = { ...this.choice, codec: bare, avcFormat: /^avc1/.test(bare) ? "avc" : undefined };
+      this.encoder.configure({
+        codec: bare,
+        ...base,
+        ...(this.choice.avcFormat === "avc" ? { avc: { format: "avc" as const } } : {})
+      });
+    }
     if (!first) this.keyframes.request(); // reconfigure → next frame should be a keyframe
   }
 

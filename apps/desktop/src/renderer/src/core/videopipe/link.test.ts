@@ -58,10 +58,10 @@ vi.mock("./probe", async (orig) => {
   return {
     ...actual,
     probeLocalCaps: vi.fn(async () => ({
-      encodeHw: ["avc1.42E01F"],
-      decodeHw: ["avc1.42E01F"],
-      encodeSw: ["avc1.42E01F", "vp8"],
-      decodeSw: ["avc1.42E01F", "vp8"]
+      encodeHw: ["avc1.42E028"],
+      decodeHw: ["avc1.42E028"],
+      encodeSw: ["avc1.42E028", "vp8"],
+      decodeSw: ["avc1.42E028", "vp8"]
     }))
   };
 });
@@ -149,7 +149,7 @@ describe("VideoLink handshake", () => {
   it("host falls back to WebRTC when the viewer can't hardware decode", async () => {
     const probe = await import("./probe");
     (probe.probeLocalCaps as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ encodeHw: ["avc1.42E01F"], decodeHw: ["avc1.42E01F"], encodeSw: [], decodeSw: [] }) // host
+      .mockResolvedValueOnce({ encodeHw: ["avc1.42E028"], decodeHw: ["avc1.42E028"], encodeSw: [], decodeSw: [] }) // host
       .mockResolvedValueOnce({ encodeHw: [], decodeHw: [], encodeSw: ["vp8"], decodeSw: ["vp8"] }); // viewer
 
     const modes: string[] = [];

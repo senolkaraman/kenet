@@ -25,10 +25,12 @@ export type ProbeFn = (choice: CodecChoice, width: number, height: number) => Pr
 
 // Ordered best-first for screen content on Windows: H.264 has the broadest GPU encoder coverage
 // (Intel QSV / AMD VCE / NVENC), then VP9, then VP8 as the always-there software fallback.
+// Levels are set to 4.0/4.1 (≈2K @ 30fps) — high enough for any laptop panel; a too-low level
+// passes isConfigSupported() but makes configure() throw "Encoder creation error".
 export const CODEC_CANDIDATES: CodecChoice[] = [
-  { codec: "avc1.42E01F", label: "H.264 (Baseline)", avcFormat: "avc" },
-  { codec: "avc1.4D401F", label: "H.264 (Main)", avcFormat: "avc" },
-  { codec: "vp09.00.10.08", label: "VP9" },
+  { codec: "avc1.42E028", label: "H.264 (Baseline)", avcFormat: "avc" },
+  { codec: "avc1.4D4028", label: "H.264 (Main)", avcFormat: "avc" },
+  { codec: "vp09.00.41.08", label: "VP9" },
   { codec: "vp8", label: "VP8" }
 ];
 

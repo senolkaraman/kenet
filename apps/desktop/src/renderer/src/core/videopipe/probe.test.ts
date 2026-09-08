@@ -10,7 +10,7 @@ describe("selectVideoCodec", () => {
         ? support({ encode: true, decode: true, hardware: true })
         : support({ encode: true, decode: true, hardware: false });
     const r = await selectVideoCodec(probe, 1366, 768);
-    expect(r?.choice.codec).toBe("avc1.4D401F");
+    expect(r?.choice.codec).toBe("avc1.4D4028");
     expect(r?.hardware).toBe(true);
   });
 
@@ -46,7 +46,7 @@ describe("selectVideoCodec", () => {
       return support({});
     };
     const r = await selectVideoCodec(probe, 1366, 768);
-    expect(r?.choice.codec).toBe("avc1.4D401F");
+    expect(r?.choice.codec).toBe("avc1.4D4028");
   });
 
   it("returns null when nothing works at all", async () => {
@@ -65,14 +65,14 @@ describe("probeLocalCaps", () => {
 
   it("buckets hw/sw from the per-codec probe", async () => {
     const probe: ProbeFn = async (c) =>
-      c.codec === "avc1.42E01F"
+      c.codec === "avc1.42E028"
         ? support({ encode: true, decode: true, hardware: true })
         : c.codec === "vp8"
           ? support({ encode: true, decode: true, hardware: false })
           : support({});
     const caps = await probeLocalCaps(1366, 768, probe);
-    expect(caps.encodeHw).toEqual(["avc1.42E01F"]);
-    expect(caps.encodeSw).toEqual(["avc1.42E01F", "vp8"]);
+    expect(caps.encodeHw).toEqual(["avc1.42E028"]);
+    expect(caps.encodeSw).toEqual(["avc1.42E028", "vp8"]);
   });
 
   it("falls back to VP8 when the probe reports nothing but the API exists", async () => {
