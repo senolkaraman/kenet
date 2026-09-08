@@ -14,7 +14,7 @@ export interface VideoCaps {
 }
 
 export type VideoDecision =
-  | { mode: "webcodecs"; codec: string; choice: CodecChoice }
+  | { mode: "webcodecs"; codec: string; choice: CodecChoice; hardware: boolean }
   | { mode: "webrtc"; why: string };
 
 export const decideVideoPath = (
@@ -28,7 +28,7 @@ export const decideVideoPath = (
 
   for (const choice of CODEC_CANDIDATES) {
     if (encSet.has(choice.codec) && decSet.has(choice.codec)) {
-      return { mode: "webcodecs", codec: choice.codec, choice };
+      return { mode: "webcodecs", codec: choice.codec, choice, hardware: true };
     }
   }
 
@@ -37,7 +37,7 @@ export const decideVideoPath = (
     const decSw = new Set([...(viewerDecode.sw ?? []), ...viewerDecode.hw]);
     for (const choice of CODEC_CANDIDATES) {
       if (encSw.has(choice.codec) && decSw.has(choice.codec)) {
-        return { mode: "webcodecs", codec: choice.codec, choice };
+        return { mode: "webcodecs", codec: choice.codec, choice, hardware: false };
       }
     }
   }

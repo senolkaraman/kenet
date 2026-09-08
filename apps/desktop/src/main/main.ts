@@ -246,22 +246,21 @@ const createTray = () => {
 
 app.on("second-instance", showWindow);
 
-// --- WebRTC screen-share tuning (must be set before app is ready) ---
-// Let the GPU do H.264 encoding (MediaFoundation) instead of the CPU, and prefer hardware
-// decode on the viewer — this is what keeps a 1080p60 desktop stream smooth without pegging
-// a core. Also allow the encoder to run above WebRTC's timid default screen-share bitrate.
+// --- screen-share / capture tuning (must be set before app is ready) ---
+// Turn on hardware video encode/decode for WebCodecs + WebRTC where the GPU supports it.
 app.commandLine.appendSwitch(
   "enable-features",
-  "PlatformHEVCEncoderSupport,MediaFoundationH264Encoding,MediaFoundationVP9Encoding,WebRtcHideLocalIpsWithMdns"
+  "PlatformHEVCEncoderSupport,MediaFoundationH264Encoding,MediaFoundationVP9Encoding,MediaFoundationD3D11VideoCapture"
 );
-app.commandLine.appendSwitch("disable-features", "WebRtcAllowLegacyTLSProtocols");
 app.commandLine.appendSwitch("enable-gpu-rasterization");
 app.commandLine.appendSwitch("enable-zero-copy");
-// Chromium throttles renderer timers/rAF when the window is backgrounded — fatal for a host
-// that's minimised to the tray while sharing its screen.
+// The host is routinely minimised / covered while it shares its screen. Chromium's default is to
+// throttle — or entirely suspend the capture of — an occluded window, which freezes the stream
+// the instant the user clicks "minimise". Disable every layer of that.
 app.commandLine.appendSwitch("disable-background-timer-throttling");
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion,WebRtcAllowLegacyTLSProtocols");
 
 app.whenReady().then(() => {
   startInputAgent();

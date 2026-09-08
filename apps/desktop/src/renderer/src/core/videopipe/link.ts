@@ -21,6 +21,7 @@ export interface VideoLinkStats {
   width: number;
   height: number;
   codec: string;
+  hardware: boolean;
   dropped: number;
   reason?: string;
 }
@@ -59,6 +60,7 @@ export class VideoLink {
   private videoChannel: RTCDataChannel | undefined;
   private rate = new RateController(START);
   private rateTimer: number | undefined;
+  private hardware = false;
   private encStats: EncoderStats | undefined;
   private decStats: DecoderStats | undefined;
   private stopped = false;
@@ -131,17 +133,22 @@ export class VideoLink {
 
   private tryNegotiate(): void {
     if (this.hooks.role !== "host" || this.mode === "webcodecs" || !this.localCaps || !this.peerCaps) return;
+    // Software WebCodecs is allowed: even without a GPU encoder, driving the bitrate ourselves
+    // over SCTP beats WebRTC's screen-share BWE, which routinely collapses to a few hundred kbps.
     const decision = decideVideoPath(
       { hw: this.localCaps.encodeHw, sw: this.localCaps.encodeSw },
-      { hw: this.peerCaps.decodeHw, sw: this.peerCaps.decodeSw }
+      { hw: this.peerCaps.decodeHw, sw: this.peerCaps.decodeSw },
+      { requireHardware: false }
     );
     // eslint-disable-next-line no-console
-    console.info("[videopipe] decision", decision, { hostEncodeHw: this.localCaps.encodeHw, viewerDecodeHw: this.peerCaps.decodeHw });
+    console.info("[videopipe] decision", decision, { hostEncodeHw: this.localCaps.encodeHw, hostEncodeSw: this.localCaps.encodeSw, viewerDecodeHw: this.peerCaps.decodeHw, viewerDecodeSw: this.peerCaps.decodeSw });
     if (decision.mode === "webrtc") {
       this.hooks.sendControl({ type: "video-mode", mode: "webrtc", from: "host", why: decision.why } satisfies ModeMsg);
       this.hooks.onMode("webrtc", decision.why);
       return;
     }
+    this.hardware = decision.hardware;
+    this.rate = new RateController(decision.hardware ? { bitrate: 8_000_000, framerate: 30 } : { bitrate: 5_000_000, framerate: 24 });
     this.enterWebCodecsHost(decision.codec);
   }
 
@@ -300,7 +307,8 @@ export class VideoLink {
       kbps: e?.bitrateKbps ?? 0,
       width: (this.hooks.role === "host" ? e?.width : d?.width) ?? 0,
       height: (this.hooks.role === "host" ? e?.height : d?.height) ?? 0,
-      codec: e?.codec ?? "",
+      codec: e?.codec ?? choiceForCodec(this.negotiatedCodec)?.label ?? "",
+      hardware: this.hardware,
       dropped: (this.hooks.role === "host" ? e?.dropped : d?.dropped) ?? 0
     });
   }

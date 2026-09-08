@@ -67,7 +67,9 @@ export function RemoteToolbar({ bridge, fullscreen, onToggleFullscreen, annotati
         {videoMode === "webcodecs" ? `${videoStats?.fps ?? 0} fps` : stats.fps != null ? `${stats.fps} fps` : "—"}
         <span className="sep" />
         {videoMode === "webcodecs"
-          ? "HW"
+          ? videoStats?.hardware
+            ? "HW"
+            : "SW"
           : stats.transport === "relay"
             ? "TURN"
             : stats.transport === "direct"

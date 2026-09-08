@@ -287,7 +287,7 @@ function HostView() {
 
         <div className="card host-side">
           <div className="stat-row"><span>Gecikme</span><strong>{rtt}</strong></div>
-          <div className="stat-row"><span>Görüntü yolu</span><strong>{videoMode === "webcodecs" ? `Donanım · ${videoStats?.codec ?? ""}` : "WebRTC (klasik)"}</strong></div>
+          <div className="stat-row"><span>Görüntü yolu</span><strong>{videoMode === "webcodecs" ? `${videoStats?.hardware ? "Donanım" : "Yazılım"} · ${videoStats?.codec ?? ""}` : "WebRTC (klasik)"}</strong></div>
           <div className="stat-row">
             <span>Gönderim</span>
             <strong>
