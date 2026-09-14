@@ -82,9 +82,9 @@ export class ScreenEncoder {
     this.choice = choice;
     this.target = { ...initial };
     this.preferHardware = opts.hardware ?? false;
-    // Software encoders can't do 30 fps at native laptop-panel resolution — start already scaled
-    // down and let adapt() walk it back toward 1:1 if the CPU turns out to have headroom.
-    this.scale = opts.hardware ? 1 : 1.5;
+    // Software encoders can't always hold 30 fps at native laptop-panel resolution — start
+    // lightly scaled down and let adapt() walk it the rest of the way only if actually needed.
+    this.scale = opts.hardware ? 1 : 1.25;
     const s = track.getSettings();
     this.srcWidth = clampDim(s.width ?? 1280);
     this.srcHeight = clampDim(s.height ?? 720);
@@ -202,10 +202,12 @@ export class ScreenEncoder {
     const now = performance.now();
     if (now - this.lastAdaptMs < 3000) return;
     const queueOk = (this.encoder?.encodeQueueSize ?? 0) < MAX_QUEUE - 1;
-    if (fps < 20 && this.scale < 3) {
+    // Bias toward resolution: only give it up once fps is genuinely bad, and grab it back as soon
+    // as there's headroom — sharpness matters as much as smoothness for reading text remotely.
+    if (fps < 16 && this.scale < 3) {
       this.scale = Math.min(3, this.scale + 0.5);
-    } else if (fps >= 27 && queueOk && this.scale > 1) {
-      this.scale = Math.max(1, this.scale - 0.5);
+    } else if (fps >= 24 && queueOk && this.scale > 1) {
+      this.scale = Math.max(1, this.scale - 0.25);
     } else {
       return;
     }

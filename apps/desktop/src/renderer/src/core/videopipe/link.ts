@@ -167,7 +167,10 @@ export class VideoLink {
     }
     this.hooks.onDiag?.(`karar: WebCodecs ${decision.hardware ? "donanım" : "yazılım"} ${decision.codec}`);
     this.hardware = decision.hardware;
-    this.rate = new RateController(decision.hardware ? { bitrate: 8_000_000, framerate: 30 } : { bitrate: 5_000_000, framerate: 24 });
+    this.rate = new RateController(
+      decision.hardware ? { bitrate: 10_000_000, framerate: 30 } : { bitrate: 6_000_000, framerate: 26 },
+      { maxBitrate: decision.hardware ? 20_000_000 : 16_000_000 }
+    );
     this.enterWebCodecsHost(decision.codec);
   }
 

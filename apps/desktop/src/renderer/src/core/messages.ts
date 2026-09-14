@@ -41,6 +41,7 @@ export type DataMessage =
   | { type: "screen-pick"; id: string }
   | { type: "clipboard-files-begin"; batch: string; count: number }
   | { type: "clipboard-files-ready"; batch: string; count: number }
+  | { type: "clipboard-pull-request" }
   // ---- remote file manager: browse the host's disk from the viewer side ----
   | { type: "fs-list"; reqId: string; path: string | null }
   | { type: "fs-list-result"; reqId: string; path: string | null; entries: FsEntry[]; error?: string }

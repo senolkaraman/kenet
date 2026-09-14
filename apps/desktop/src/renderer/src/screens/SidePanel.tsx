@@ -122,6 +122,14 @@ export function SidePanel({ onClose }: { onClose: () => void }) {
           >
             {sendingClip ? <span className="spinner" /> : <Icon name="clipboard" />} Panomdaki dosyayı karşıya yapıştır
           </Button>
+          <Button
+            block
+            variant="ghost"
+            title="Karşı taraf bir dosya kopyaladıysa onu senin panona getirir — sonra sende Ctrl+V / Yapıştır"
+            onClick={() => session.requestClipboardFiles()}
+          >
+            <Icon name="clipboard" /> Karşı taraftaki dosyayı panoma al
+          </Button>
           <div className="transfer-list">
             {transfers.length === 0 && <p className="muted center">Henüz aktarım yok.</p>}
             {transfers.map((t) => (

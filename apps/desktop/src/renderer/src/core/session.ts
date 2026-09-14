@@ -728,6 +728,11 @@ export class SessionController {
       case "clipboard-files-ready":
         this.set({ message: `${message.count} dosya karşı tarafın panosuna kondu.` });
         break;
+      case "clipboard-pull-request":
+        // The peer wants what's on OUR clipboard right now — sendClipboardFiles() always reads
+        // the local clipboard and pushes it out, so answering a pull is identical to a push.
+        void this.sendClipboardFiles();
+        break;
       case "fs-list":
         // Only the host side ever answers this, and only when it explicitly offered control —
         // browsing/reading the disk is at least as sensitive as remote input, so it rides the
@@ -877,6 +882,16 @@ export class SessionController {
     }
     const file = new File([read.data], read.name);
     this.offerFile(file, { remoteWritePath: remoteDir });
+  }
+
+  /** Asks the peer to push whatever is on ITS clipboard back to us — the pull half of copy/paste. */
+  requestClipboardFiles(): void {
+    if (this.channel?.readyState !== "open") {
+      this.set({ message: "Aktif oturum yok." });
+      return;
+    }
+    this.send({ type: "clipboard-pull-request" });
+    this.set({ message: "Karşı taraftaki pano isteniyor…" });
   }
 
   /**

@@ -263,6 +263,13 @@ function HostView() {
               {sendingClipboardFiles ? <span className="spinner" /> : <Icon name="file" size={15} />}
               Panodaki dosyayı gönder
             </Button>
+            <Button
+              variant="subtle"
+              title="Karşı taraf bir dosya kopyaladıysa onu senin panona getirir"
+              onClick={() => session.requestClipboardFiles()}
+            >
+              <Icon name="clipboard" size={15} /> Karşı taraftan dosya al
+            </Button>
             <Button variant="danger" onClick={() => session.endSession()}>
               <Icon name="power" size={15} /> Oturumu sonlandır
             </Button>
