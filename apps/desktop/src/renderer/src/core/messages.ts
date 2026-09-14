@@ -51,7 +51,14 @@ export type DataMessage =
   // ---- WebCodecs video path negotiation (the encoded frames themselves ride the "kenet-video"
   //      data channel as binary, not here) ----
   | { type: "video-caps"; caps: unknown }
-  | { type: "video-mode"; mode: "webrtc" | "webcodecs"; codec?: string; from?: "host" | "viewer"; why?: string };
+  | {
+      type: "video-mode";
+      mode: "webrtc" | "webcodecs";
+      codec?: string;
+      hardware?: boolean;
+      from?: "host" | "viewer";
+      why?: string;
+    };
 
 export const encode = (m: DataMessage): string => JSON.stringify(m);
 export const decode = (raw: string): DataMessage | null => {

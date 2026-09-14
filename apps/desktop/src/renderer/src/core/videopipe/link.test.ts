@@ -34,6 +34,7 @@ class FakeEncoder {
 class FakeDecoder {
   started = false;
   stopped = false;
+  startOpts: { hardware?: boolean } | undefined;
   canvas: unknown;
   constructor(public hooks: Record<string, (...a: unknown[]) => void>) {
     decoderInstances.push(this);
@@ -41,8 +42,9 @@ class FakeDecoder {
   attach(c: unknown): void {
     this.canvas = c;
   }
-  start(): void {
+  start(opts?: { hardware?: boolean }): void {
     this.started = true;
+    this.startOpts = opts;
   }
   configure(): void {}
   pushChunk(): void {}
@@ -144,6 +146,47 @@ describe("VideoLink handshake", () => {
     expect(hostPc.createDataChannel).toHaveBeenCalledWith("kenet-video", expect.anything());
     expect(encoderInstances[0]?.started).toBe(true);
     expect(decoderInstances[0]?.started).toBe(true);
+    // Both peers have the codec in their hw lists here, so the negotiated path is hardware —
+    // the viewer's decoder must be told, or it asks for "prefer-hardware" on a machine that may
+    // not actually have one and throws "Decoder creation error".
+    expect(decoderInstances[0]?.startOpts).toEqual({ hardware: true });
+  });
+
+  it("tells the viewer's decoder when the negotiated path is software (no prefer-hardware)", async () => {
+    const probe = await import("./probe");
+    (probe.probeLocalCaps as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ encodeHw: [], decodeHw: [], encodeSw: ["vp8"], decodeSw: ["vp8"] }) // host
+      .mockResolvedValueOnce({ encodeHw: [], decodeHw: [], encodeSw: ["vp8"], decodeSw: ["vp8"] }); // viewer
+
+    const wires: Record<string, ((m: unknown) => void)[]> = { host: [], viewer: [] };
+    const host = new VideoLink({
+      role: "host",
+      pc: makePc(),
+      sendControl: (m) => wires.viewer.forEach((f) => f(m)),
+      getScreenTrack: () => track,
+      getVideoSender: () => ({ replaceTrack: vi.fn(async () => {}) }) as unknown as RTCRtpSender,
+      getCanvas: () => null,
+      onMode: () => {},
+      onStats: () => {}
+    });
+    const viewer = new VideoLink({
+      role: "viewer",
+      pc: makePc(),
+      sendControl: (m) => wires.host.forEach((f) => f(m)),
+      getScreenTrack: () => null,
+      getVideoSender: () => null,
+      getCanvas: () => ({}) as HTMLCanvasElement,
+      onMode: () => {},
+      onStats: () => {}
+    });
+    wires.host.push((m) => host.onControlMessage(m));
+    wires.viewer.push((m) => viewer.onControlMessage(m));
+
+    await host.start();
+    await viewer.start();
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(decoderInstances[0]?.startOpts).toEqual({ hardware: false });
   });
 
   it("host falls back to WebRTC when the viewer can't hardware decode", async () => {

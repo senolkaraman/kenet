@@ -44,7 +44,14 @@ export interface VideoLinkHooks {
 }
 
 type CapsMsg = { type: "video-caps"; caps: LocalVideoCaps };
-type ModeMsg = { type: "video-mode"; mode: VideoMode; codec?: string; from?: "host" | "viewer"; why?: string };
+type ModeMsg = {
+  type: "video-mode";
+  mode: VideoMode;
+  codec?: string;
+  hardware?: boolean;
+  from?: "host" | "viewer";
+  why?: string;
+};
 
 const START = { bitrate: 8_000_000, framerate: 30 };
 
@@ -173,6 +180,7 @@ export class VideoLink {
     // viewer receiving "webcodecs": get ready; the kenet-video channel + config follow
     if (this.hooks.role === "viewer") {
       this.mode = "webcodecs";
+      this.hardware = m.hardware ?? false;
       this.hooks.onMode("webcodecs");
       this.startDecoder();
     }
@@ -199,7 +207,13 @@ export class VideoLink {
     }
     void this.hooks.getVideoSender()?.replaceTrack(null).catch(() => {});
     this.mode = "webcodecs";
-    this.hooks.sendControl({ type: "video-mode", mode: "webcodecs", codec, from: "host" } satisfies ModeMsg);
+    this.hooks.sendControl({
+      type: "video-mode",
+      mode: "webcodecs",
+      codec,
+      hardware: this.hardware,
+      from: "host"
+    } satisfies ModeMsg);
     this.hooks.onMode("webcodecs");
   }
 
@@ -253,20 +267,29 @@ export class VideoLink {
       },
       onFirstFrame: () => {
         this.sawFrame = true;
+        this.decoderFailures = 0; // a clean frame means the decoder is healthy again
         if (this.firstFrameWatchdog !== undefined) window.clearTimeout(this.firstFrameWatchdog);
         this.hooks.onMode("webcodecs");
       },
-      onError: () => {
+      onError: (err) => {
         this.decoderFailures += 1;
+        // eslint-disable-next-line no-console
+        console.warn(`[videopipe] decoder error (${this.decoderFailures}/3):`, err);
+        this.hooks.onDiag?.(`decoder hata (${this.decoderFailures}/3): ${err.message}`);
         if (this.decoderFailures >= 3) {
-          this.hooks.sendControl({ type: "video-mode", mode: "webrtc", from: "viewer", why: "decoder failing" } satisfies ModeMsg);
-          this.fallback("decoder failing");
+          this.hooks.sendControl({
+            type: "video-mode",
+            mode: "webrtc",
+            from: "viewer",
+            why: `decoder failing: ${err.message}`
+          } satisfies ModeMsg);
+          this.fallback(`decoder: ${err.message}`);
         }
       }
     });
     this.decoder.attach(canvas);
     try {
-      this.decoder.start();
+      this.decoder.start({ hardware: this.hardware });
     } catch {
       this.fallback("no WebCodecs decoder");
       return;

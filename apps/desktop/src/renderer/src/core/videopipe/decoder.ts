@@ -37,6 +37,7 @@ export class ScreenDecoder {
   private statsTimer: number | undefined;
   private framesSinceStat = 0;
   private dropped = 0;
+  private preferHardware = false;
 
   constructor(private readonly hooks: ScreenDecoderHooks) {}
 
@@ -45,8 +46,9 @@ export class ScreenDecoder {
     this.ctx = canvas.getContext("2d", { alpha: false, desynchronized: true }) ?? undefined;
   }
 
-  start(): void {
+  start(opts: { hardware?: boolean } = {}): void {
     if (typeof VideoDecoder === "undefined") throw new Error("WebCodecs VideoDecoder unavailable");
+    this.preferHardware = opts.hardware ?? false;
     this.decoder = this.makeDecoder();
     this.statsTimer = window.setInterval(() => this.emitStats(), 1000);
   }
@@ -60,7 +62,9 @@ export class ScreenDecoder {
         codedWidth: cfg.codedWidth,
         codedHeight: cfg.codedHeight,
         description: cfg.description ? cfg.description.slice() : undefined,
-        hardwareAcceleration: "prefer-hardware",
+        // Same failure mode the encoder had: "prefer-hardware" on a machine with no hardware
+        // decoder for this codec throws "Decoder creation error" instead of using software.
+        hardwareAcceleration: (this.preferHardware ? "prefer-hardware" : "no-preference") as HardwareAcceleration,
         optimizeForLatency: true
       });
       this.width = cfg.codedWidth;
