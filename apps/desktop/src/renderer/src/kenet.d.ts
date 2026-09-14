@@ -33,6 +33,9 @@ interface Window {
     setFullscreen?(on: boolean): Promise<boolean>;
     minimizeWindow?(): void;
     closeWindow?(): void;
+    setHostingActive?(active: boolean): void;
+    exitMiniWindow?(): void;
+    onMiniModeChanged?(cb: (mini: boolean) => void): () => void;
     saveIncomingFile?(name: string, data: ArrayBuffer): Promise<{ saved: boolean; path?: string }>;
     getStartupPrefs?(): Promise<{ startWithWindows: boolean; runInBackground: boolean }>;
     setStartupPrefs?(prefs: { startWithWindows?: boolean; runInBackground?: boolean }): Promise<{ ok: boolean }>;

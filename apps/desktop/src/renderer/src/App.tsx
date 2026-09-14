@@ -37,6 +37,11 @@ export function App() {
   const [activityOpen, setActivityOpen] = useState(false);
   const [billingOpen, setBillingOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [mini, setMini] = useState(false);
+
+  // The window shrinks to a corner instead of truly minimising while hosting (see main.ts) —
+  // give the user an obvious way back to full size.
+  useEffect(() => window.kenetControl.onMiniModeChanged?.(setMini), []);
 
   useEffect(() => {
     void bootstrapAuth();
@@ -193,6 +198,32 @@ export function App() {
       {billingOpen && <BillingModal onClose={() => setBillingOpen(false)} />}
       {adminOpen && <AdminModal onClose={() => setAdminOpen(false)} />}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {mini && (
+        <button
+          onClick={() => window.kenetControl.exitMiniWindow?.()}
+          title="Tam boyuta dön"
+          style={{
+            position: "fixed",
+            top: 8,
+            right: 8,
+            zIndex: 50,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 10px",
+            borderRadius: 8,
+            border: "1px solid var(--stroke)",
+            background: "var(--bg-2)",
+            color: "var(--text-1)",
+            font: "inherit",
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: "pointer"
+          }}
+        >
+          <Icon name="fullscreen" size={13} /> Genişlet
+        </button>
+      )}
       <Toaster />
     </div>
   );

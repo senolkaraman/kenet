@@ -507,7 +507,10 @@ export class SessionController {
     this.set({ phase: "active", startedAt: Date.now(), message: "Güvenli oturum etkin." });
     audit("session-started", this.get().peerName ?? "cihaz");
     this.logActivity(this.get().unattendedSession ? "unattended-session" : "session-start");
-    if (this.get().role === "host") void window.kenetControl.showOverlay?.();
+    if (this.get().role === "host") {
+      void window.kenetControl.showOverlay?.();
+      window.kenetControl.setHostingActive?.(true);
+    }
     this.startClipboardSync();
     this.startIdleWatch();
     // The host never applied any encoding params before the first "quality" message, so it started
@@ -1285,7 +1288,10 @@ export class SessionController {
     if (reason !== "Karşı taraf oturumu sonlandırdı.") this.send({ type: "bye" });
     if (this.get().privacyActive) void window.kenetControl.setPrivacyMode?.(false);
     this.stopPrivacyHeartbeat();
-    if (this.get().role === "host") void window.kenetControl.hideOverlay?.();
+    if (this.get().role === "host") {
+      void window.kenetControl.hideOverlay?.();
+      window.kenetControl.setHostingActive?.(false);
+    }
     if (this.recorder) void this.stopRecording();
     this.stopClipboardSync();
     this.stopIdleWatch();

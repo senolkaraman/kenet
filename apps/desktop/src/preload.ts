@@ -15,6 +15,13 @@ contextBridge.exposeInMainWorld("kenetControl", {
   setFullscreen: (on: boolean) => ipcRenderer.invoke("window:fullscreen", on) as Promise<boolean>,
   minimizeWindow: () => ipcRenderer.send("window:minimize"),
   closeWindow: () => ipcRenderer.send("window:close"),
+  setHostingActive: (active: boolean) => ipcRenderer.send("session:hosting-active", active),
+  exitMiniWindow: () => ipcRenderer.send("window:exit-mini"),
+  onMiniModeChanged: (cb: (mini: boolean) => void) => {
+    const handler = (_e: unknown, mini: boolean) => cb(mini);
+    ipcRenderer.on("window:mini-changed", handler);
+    return () => ipcRenderer.removeListener("window:mini-changed", handler);
+  },
   getStartupPrefs: () =>
     ipcRenderer.invoke("app:startup-prefs") as Promise<{ startWithWindows: boolean; runInBackground: boolean }>,
   setStartupPrefs: (prefs: { startWithWindows?: boolean; runInBackground?: boolean }) =>

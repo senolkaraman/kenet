@@ -101,6 +101,9 @@ const uniquePath = async (target: string): Promise<string> => {
 
 let inputAgent: ChildProcessWithoutNullStreams | undefined;
 let mainWindow: BrowserWindow | undefined;
+let hostingActive = false;
+let savedBounds: Electron.Rectangle | undefined;
+let inMiniCorner = false;
 let overlayWindow: BrowserWindow | undefined;
 let recordingStream: WriteStream | null = null;
 let recordingPath: string | null = null;
@@ -213,8 +216,48 @@ const createWindow = () => {
     }
   });
 
+  // Minimising (native chrome, our own titlebar button, Win+D, taskbar click — anything) occludes
+  // the window. Chromium treats an occluded/minimised window like a backgrounded tab: it throttles
+  // — and on some builds outright suspends — the exact capture/encode pipeline a hosting session
+  // needs, which is what froze the remote screen the instant the user clicked minimise. While
+  // actively hosting, un-minimise immediately and shrink the window into an out-of-the-way corner
+  // instead: still fully "shown" to Chromium (no throttling), but out from underfoot.
+  mainWindow.on("minimize", () => {
+    if (!hostingActive || !mainWindow) return;
+    mainWindow.restore();
+    enterMiniCorner();
+  });
+
   if (process.env.NODE_ENV === "development") void mainWindow.loadURL("http://localhost:5173");
   else void mainWindow.loadFile(path.join(app.getAppPath(), "renderer", "index.html"));
+};
+
+const MINI_SIZE = { width: 360, height: 240 };
+
+const enterMiniCorner = (): void => {
+  if (!mainWindow || inMiniCorner) return;
+  savedBounds = mainWindow.getBounds();
+  inMiniCorner = true;
+  mainWindow.setMinimumSize(MINI_SIZE.width, MINI_SIZE.height);
+  const area = screen.getDisplayMatching(savedBounds).workArea;
+  mainWindow.setBounds({
+    width: MINI_SIZE.width,
+    height: MINI_SIZE.height,
+    x: area.x + area.width - MINI_SIZE.width - 16,
+    y: area.y + area.height - MINI_SIZE.height - 16
+  });
+  mainWindow.setAlwaysOnTop(true, "floating");
+  mainWindow.webContents.send("window:mini-changed", true);
+};
+
+const exitMiniCorner = (): void => {
+  if (!mainWindow || !inMiniCorner) return;
+  inMiniCorner = false;
+  mainWindow.setAlwaysOnTop(false);
+  mainWindow.setMinimumSize(900, 620);
+  if (savedBounds) mainWindow.setBounds(savedBounds);
+  savedBounds = undefined;
+  mainWindow.webContents.send("window:mini-changed", false);
 };
 
 const showWindow = () => {
@@ -597,6 +640,11 @@ app.whenReady().then(() => {
   });
   ipcMain.on("window:minimize", () => mainWindow?.minimize());
   ipcMain.on("window:close", () => mainWindow?.close());
+  ipcMain.on("session:hosting-active", (_event, active: unknown) => {
+    hostingActive = Boolean(active);
+    if (!hostingActive) exitMiniCorner();
+  });
+  ipcMain.on("window:exit-mini", () => exitMiniCorner());
 
   ipcMain.handle("app:open-external", (_event, url: unknown) => {
     if (typeof url === "string" && /^https:\/\//.test(url)) void shell.openExternal(url);
